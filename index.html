@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Savicar ERP — O sistema que roda no ritmo da sua oficina</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- ===================== NAVBAR ===================== -->
+  <header class="navbar" id="navbar">
+    <div class="container navbar__inner">
+      <a href="#" class="navbar__logo">
+        <span class="logo-icon">&#9965;</span>
+        <span class="logo-text">Savicar</span>
+      </a>
+      <nav class="navbar__links" id="nav-links">
+        <a href="#como-funciona">Recursos</a>
+        <a href="#como-funciona">Como Funciona</a>
+        <a href="#diferenciais">Diferenciais</a>
+      </nav>
+      <a href="#demonstracao" class="btn btn--primary navbar__cta">Agendar Demonstração</a>
+      <button class="navbar__hamburger" id="hamburger" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ===================== HERO ===================== -->
+  <section class="hero" id="hero">
+    <div class="hero__bg-shapes">
+      <div class="shape shape-1"></div>
+      <div class="shape shape-2"></div>
+      <div class="shape shape-3"></div>
+    </div>
+    <div class="container hero__inner">
+      <div class="hero__content">
+        <div class="hero__badge">
+          <span class="badge-dot"></span>
+          ERP para Oficinas Automotivas
+        </div>
+        <h1 class="hero__title">
+          Do agendamento ao caixa.<br />
+          <span class="highlight">O ERP que roda no ritmo<br />da sua oficina.</span>
+        </h1>
+        <p class="hero__subtitle">
+          Chega de sistemas difíceis ou planilhas que somem com o seu lucro. O Savicar
+          une agendamento, O.S., estoque e financeiro em uma única tela, totalmente
+          customizável para o seu negócio.
+        </p>
+        <div class="hero__actions">
+          <a href="#demonstracao" class="btn btn--primary btn--lg">Ver o Savicar em Ação</a>
+          <a href="#como-funciona" class="btn btn--ghost btn--lg">Como funciona</a>
+        </div>
+        <p class="hero__sub-cta">
+          <svg class="icon-clock" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
+          Leva menos de 1 minuto.
+        </p>
+      </div>
+      <div class="hero__visual">
+        <div class="screen-mockup">
+          <div class="screen-mockup__bar">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="screen-mockup__body">
+            <div class="mock-header">
+              <div class="mock-title">Ordens de Serviço</div>
+              <div class="mock-btn">+ Nova O.S.</div>
+            </div>
+            <div class="mock-table">
+              <div class="mock-row mock-row--header">
+                <span>Cliente</span><span>Veículo</span><span>Status</span><span>Valor</span>
+              </div>
+              <div class="mock-row">
+                <span>João Silva</span><span>Civic 2021</span>
+                <span class="status status--green">Concluído</span>
+                <span>R$ 480</span>
+              </div>
+              <div class="mock-row">
+                <span>Maria Costa</span><span>HB20 2022</span>
+                <span class="status status--yellow">Em andamento</span>
+                <span>R$ 1.250</span>
+              </div>
+              <div class="mock-row">
+                <span>Pedro Alves</span><span>Corolla 2020</span>
+                <span class="status status--blue">Aguardando</span>
+                <span>R$ 890</span>
+              </div>
+              <div class="mock-row">
+                <span>Ana Souza</span><span>Gol 2019</span>
+                <span class="status status--orange">Em teste</span>
+                <span>R$ 320</span>
+              </div>
+            </div>
+            <div class="mock-footer">
+              <div class="mock-stat">
+                <div class="mock-stat__value">R$ 12.480</div>
+                <div class="mock-stat__label">Faturamento do mês</div>
+              </div>
+              <div class="mock-stat">
+                <div class="mock-stat__value">34</div>
+                <div class="mock-stat__label">O.S. abertas</div>
+              </div>
+              <div class="mock-stat">
+                <div class="mock-stat__value">97%</div>
+                <div class="mock-stat__label">Satisfação</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="phone-mockup">
+          <div class="phone-mockup__inner">
+            <div class="phone-notch"></div>
+            <div class="phone-content">
+              <div class="phone-header">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"/></svg>
+                Agendamentos
+              </div>
+              <div class="phone-appt">
+                <div class="appt-time">09:00</div>
+                <div class="appt-info">
+                  <div class="appt-name">Carlos Mendes</div>
+                  <div class="appt-service">Revisão Completa</div>
+                </div>
+              </div>
+              <div class="phone-appt">
+                <div class="appt-time">10:30</div>
+                <div class="appt-info">
+                  <div class="appt-name">Fernanda Lima</div>
+                  <div class="appt-service">Troca de óleo</div>
+                </div>
+              </div>
+              <div class="phone-appt phone-appt--next">
+                <div class="appt-time">14:00</div>
+                <div class="appt-info">
+                  <div class="appt-name">Ricardo Nunes</div>
+                  <div class="appt-service">Balanceamento</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="hero__scroll">
+      <a href="#como-funciona">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 9l-7 7-7-7"/></svg>
+      </a>
+    </div>
+  </section>
+
+  <!-- ===================== COMO FUNCIONA ===================== -->
+  <section class="process" id="como-funciona">
+    <div class="container">
+      <div class="section-header">
+        <p class="section-tag">Como funciona</p>
+        <h2 class="section-title">Menos digitação,<br /><span class="highlight">mais faturamento.</span></h2>
+        <p class="section-subtitle">Veja como cada etapa se conecta automaticamente, do agendamento ao caixa.</p>
+      </div>
+      <div class="process__steps">
+        <div class="process__step" data-step="1">
+          <div class="step__connector"></div>
+          <div class="step__icon step__icon--blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </div>
+          <div class="step__body">
+            <h3>Agendamento Inteligente</h3>
+            <p>O cliente agenda o serviço pelo sistema. O horário fica reservado e a oficina se prepara antes mesmo do carro chegar.</p>
+          </div>
+        </div>
+        <div class="process__arrow">→</div>
+        <div class="process__step" data-step="2">
+          <div class="step__connector"></div>
+          <div class="step__icon step__icon--orange">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </div>
+          <div class="step__body">
+            <h3>O.S. Automática</h3>
+            <p>O carro chegou? Com um clique, transforme o agendamento em uma Ordem de Serviço com os dados do cliente e do veículo pré-preenchidos.</p>
+          </div>
+        </div>
+        <div class="process__arrow">→</div>
+        <div class="process__step" data-step="3">
+          <div class="step__connector"></div>
+          <div class="step__icon step__icon--teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          </div>
+          <div class="step__body">
+            <h3>Estoque Blindado</h3>
+            <p>Adicionou uma peça ou lubrificante na O.S.? O Savicar dá baixa automática no estoque e atualiza o custo do serviço na hora.</p>
+          </div>
+        </div>
+        <div class="process__arrow">→</div>
+        <div class="process__step" data-step="4">
+          <div class="step__connector"></div>
+          <div class="step__icon step__icon--green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+          </div>
+          <div class="step__body">
+            <h3>Financeiro em Dia</h3>
+            <p>Serviço concluído e O.S. fechada? O valor vai direto para o seu fluxo de caixa. Você sabe na hora quem pagou e quem ainda está devendo.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== FINANCEIRO ===================== -->
+  <section class="financial" id="financeiro">
+    <div class="container financial__inner">
+      <div class="financial__visual">
+        <div class="finance-card">
+          <div class="finance-card__header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
+            Painel Financeiro
+          </div>
+          <div class="finance-items">
+            <div class="finance-item finance-item--green">
+              <div class="finance-item__icon">✓</div>
+              <div class="finance-item__info">
+                <div class="finance-item__label">Recebido</div>
+                <div class="finance-item__value">R$ 8.640</div>
+              </div>
+              <div class="finance-item__bar">
+                <div class="finance-item__bar-fill" style="width:72%"></div>
+              </div>
+            </div>
+            <div class="finance-item finance-item--yellow">
+              <div class="finance-item__icon">◷</div>
+              <div class="finance-item__info">
+                <div class="finance-item__label">A Vencer</div>
+                <div class="finance-item__value">R$ 2.300</div>
+              </div>
+              <div class="finance-item__bar">
+                <div class="finance-item__bar-fill" style="width:19%"></div>
+              </div>
+            </div>
+            <div class="finance-item finance-item--red">
+              <div class="finance-item__icon">!</div>
+              <div class="finance-item__info">
+                <div class="finance-item__label">Em Atraso</div>
+                <div class="finance-item__value">R$ 1.080</div>
+              </div>
+              <div class="finance-item__bar">
+                <div class="finance-item__bar-fill" style="width:9%"></div>
+              </div>
+            </div>
+          </div>
+          <div class="finance-total">
+            <span>Total do mês</span>
+            <span class="finance-total__value">R$ 12.020</span>
+          </div>
+        </div>
+      </div>
+      <div class="financial__content">
+        <p class="section-tag">Controle Financeiro</p>
+        <h2 class="section-title">Quem pagou e quem ainda não pagou? <span class="highlight">O Savicar te responde em um clique.</span></h2>
+        <p class="section-text">
+          Chega de cobrar cliente de cabeça ou esquecer valores no caderninho. Tenha um painel visual que separa seus recebimentos por cores.
+        </p>
+        <ul class="finance-list">
+          <li class="finance-list__item finance-list__item--green">
+            <span class="finance-list__dot"></span>
+            <div>
+              <strong>Recebido</strong>
+              <p>Dinheiro no bolso e histórico do cliente atualizado.</p>
+            </div>
+          </li>
+          <li class="finance-list__item finance-list__item--yellow">
+            <span class="finance-list__dot"></span>
+            <div>
+              <strong>A Vencer</strong>
+              <p>Previsibilidade de caixa para comprar peças sem sufoco.</p>
+            </div>
+          </li>
+          <li class="finance-list__item finance-list__item--red">
+            <span class="finance-list__dot"></span>
+            <div>
+              <strong>Em Atraso</strong>
+              <p>Alertas de inadimplência para você cobrar com profissionalismo.</p>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== DIFERENCIAIS / CUSTOMIZAÇÃO ===================== -->
+  <section class="custom" id="diferenciais">
+    <div class="container">
+      <div class="section-header">
+        <p class="section-tag">Customização</p>
+        <h2 class="section-title">Um ERP flexível. <span class="highlight">É o Savicar que se adapta<br />à sua oficina, não o contrário.</span></h2>
+        <p class="section-subtitle">
+          Sabemos que cada oficina tem um jeito único de trabalhar. Por isso, o Savicar é altamente customizável.
+        </p>
+      </div>
+      <div class="custom__grid">
+        <div class="custom-card">
+          <div class="custom-card__icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/><path d="M22.54 9A10 10 0 0121 20M1.46 9a10 10 0 001.54 11"/></svg>
+          </div>
+          <h3>Status Personalizados</h3>
+          <p>Crie seus próprios status de O.S. como <em>"Aguardando Retífica"</em> ou <em>"Em teste de rua"</em> para refletir seu fluxo real.</p>
+        </div>
+        <div class="custom-card">
+          <div class="custom-card__icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          </div>
+          <h3>Campos Personalizados</h3>
+          <p>Adicione campos únicos para capturar as informações que fazem sentido para o seu tipo de serviço e clientela.</p>
+        </div>
+        <div class="custom-card">
+          <div class="custom-card__icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          </div>
+          <h3>Relatórios Sob Medida</h3>
+          <p>Tenha dashboards e relatórios com as métricas que você realmente precisa acompanhar para crescer.</p>
+        </div>
+        <div class="custom-card">
+          <div class="custom-card__icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <h3>Para Todo Tipo de Oficina</h3>
+          <p>Especializada em importados, motos, ou um grande Auto Center: o Savicar foi feito para você.</p>
+        </div>
+      </div>
+      <div class="custom__banner">
+        Seja você uma oficina especializada em importados, motos ou um grande Auto Center: <strong>o Savicar foi feito para você.</strong>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== FORMULÁRIO DE CAPTURA ===================== -->
+  <section class="cta-form" id="demonstracao">
+    <div class="container cta-form__inner">
+      <div class="cta-form__content">
+        <p class="section-tag section-tag--light">Demonstração Gratuita</p>
+        <h2 class="cta-form__title">Pronto para parar de perder tempo com papelada e impulsionar sua oficina?</h2>
+        <p class="cta-form__subtitle">Solicite uma demonstração gratuita e veja como o Savicar pode ser customizado para a sua rotina.</p>
+        <ul class="cta-form__perks">
+          <li>
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Demonstração 100% gratuita e sem compromisso
+          </li>
+          <li>
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Configuração personalizada para o seu negócio
+          </li>
+          <li>
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Suporte em português pelo WhatsApp
+          </li>
+        </ul>
+      </div>
+      <div class="cta-form__form-wrap">
+        <form class="form" id="lead-form">
+          <div class="form__group">
+            <label for="name">Seu Nome</label>
+            <input type="text" id="name" name="name" placeholder="Ex: Carlos Mendes" required />
+          </div>
+          <div class="form__group">
+            <label for="shop">Nome da Oficina</label>
+            <input type="text" id="shop" name="shop" placeholder="Ex: Oficina do Carlos" required />
+          </div>
+          <div class="form__group">
+            <label for="phone">WhatsApp (com DDD)</label>
+            <input type="tel" id="phone" name="phone" placeholder="(11) 99999-9999" required />
+          </div>
+          <div class="form__group">
+            <label>Qual seu maior desafio hoje?</label>
+            <div class="form__checks">
+              <label class="check-label">
+                <input type="checkbox" name="challenge" value="estoque" />
+                <span class="check-box"></span>
+                Organizar o estoque de peças
+              </label>
+              <label class="check-label">
+                <input type="checkbox" name="challenge" value="financeiro" />
+                <span class="check-box"></span>
+                Controlar quem pagou / Financeiro
+              </label>
+              <label class="check-label">
+                <input type="checkbox" name="challenge" value="agendamento" />
+                <span class="check-box"></span>
+                Agendamentos e Ordens de Serviço
+              </label>
+            </div>
+          </div>
+          <button type="submit" class="btn btn--primary btn--full btn--lg">
+            Quero Conhecer o Savicar
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+          </button>
+          <p class="form__privacy">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+            Seus dados estão seguros. Sem spam, prometemos.
+          </p>
+        </form>
+        <div class="form__success" id="form-success">
+          <div class="success-icon">✓</div>
+          <h3>Recebemos sua solicitação!</h3>
+          <p>Nossa equipe vai entrar em contato com você pelo WhatsApp em breve. Fique atento!</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div class="footer__brand">
+        <a href="#" class="navbar__logo">
+          <span class="logo-icon">&#9965;</span>
+          <span class="logo-text">Savicar</span>
+        </a>
+        <p>O ERP que roda no ritmo da sua oficina.</p>
+      </div>
+      <div class="footer__links">
+        <a href="#como-funciona">Como Funciona</a>
+        <a href="#financeiro">Financeiro</a>
+        <a href="#diferenciais">Diferenciais</a>
+        <a href="#demonstracao">Demonstração</a>
+      </div>
+    </div>
+    <div class="footer__bottom">
+      <div class="container">
+        <p>&copy; 2025 Savicar ERP. Todos os direitos reservados.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

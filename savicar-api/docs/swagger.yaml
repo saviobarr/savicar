@@ -1,0 +1,2438 @@
+basePath: /
+definitions:
+  badencar-api_internal_domain_services.Service:
+    properties:
+      code:
+        type: string
+      description:
+        type: string
+      hours_quantity:
+        type: number
+      id_order:
+        type: integer
+      id_service:
+        type: integer
+      total_value:
+        type: number
+      unit_value:
+        type: number
+    type: object
+  contact.Contact:
+    properties:
+      address:
+        type: string
+      address_number:
+        type: integer
+      email:
+        type: string
+      id_city:
+        type: integer
+      id_contact:
+        type: integer
+      id_customer:
+        type: integer
+      is_mobile_phone_whatsapp:
+        type: boolean
+      mobile_phone:
+        type: string
+      neighborhood:
+        type: string
+    type: object
+  customer.Customer:
+    properties:
+      dob:
+        type: string
+      gender:
+        type: integer
+      id_customer:
+        type: integer
+      image_path:
+        type: string
+      individual_name:
+        type: string
+      is_active:
+        type: boolean
+      is_legal_person:
+        type: boolean
+      legal_name:
+        type: string
+      municipal_registration:
+        type: string
+      state_registration:
+        type: string
+      tax_id:
+        type: string
+      trade_name:
+        type: string
+      web_site:
+        type: string
+    type: object
+  customermodel.CustomerModel:
+    properties:
+      color:
+        type: string
+      customer_name:
+        type: string
+      id_customer:
+        type: integer
+      id_customer_model:
+        type: integer
+      id_model:
+        type: integer
+      model_name:
+        type: string
+      plate:
+        type: string
+      vin:
+        type: string
+      year_make:
+        type: integer
+      year_model:
+        type: integer
+    type: object
+  fuel.Fuel:
+    properties:
+      id_fuel:
+        type: integer
+      name:
+        type: string
+    type: object
+  inventory.Inventory:
+    properties:
+      classification_type:
+        type: integer
+      code:
+        type: string
+      cost_price:
+        type: number
+      current_quantity:
+        type: integer
+      gross_weight:
+        type: integer
+      gtin_ean_code:
+        type: string
+      id_make:
+        type: integer
+      id_product:
+        type: integer
+      id_unity:
+        type: integer
+      image_path:
+        type: string
+      initial_inventory_quantity:
+        type: integer
+      internal_code:
+        type: string
+      maker_code:
+        type: string
+      max:
+        type: integer
+      min:
+        type: integer
+      name:
+        type: string
+      net_weight:
+        type: integer
+      product_origin:
+        type: integer
+      product_size:
+        type: string
+      provider:
+        type: string
+      provider_code:
+        type: string
+      sales_price:
+        type: number
+      storage_location:
+        type: string
+      unity_description:
+        type: string
+    type: object
+  operationalcosts.OperationalCost:
+    properties:
+      amount:
+        type: number
+      created_at:
+        type: string
+      description:
+        type: string
+      id_cost:
+        type: integer
+      id_cost_category:
+        type: integer
+      id_order:
+        type: integer
+      recurrence:
+        type: integer
+      reference_date:
+        type: string
+    type: object
+  serviceorder.ServiceOrder:
+    properties:
+      customer_name:
+        type: string
+      customer_notes:
+        type: string
+      date_time_in:
+        type: string
+      date_time_out:
+        type: string
+      diagnosis_notes:
+        type: string
+      discount:
+        type: number
+      final_amount:
+        type: number
+      id_customer:
+        type: integer
+      id_customer_model:
+        type: integer
+      id_order:
+        type: integer
+      id_technician:
+        type: integer
+      internal_notes:
+        type: string
+      model_name:
+        type: string
+      odometer_reading:
+        type: integer
+      plate_number:
+        type: string
+      service_type:
+        type: integer
+      technician_name:
+        type: string
+      total_amount:
+        type: number
+      vin:
+        type: string
+    type: object
+  serviceorderimage.ServiceOrderImage:
+    properties:
+      id_image:
+        type: integer
+      id_order:
+        type: integer
+      image_path:
+        type: string
+      video_path:
+        type: string
+    type: object
+  serviceorderproducts.ServiceOrderProduct:
+    properties:
+      id_order:
+        type: integer
+      id_product:
+        type: integer
+      id_service_order_product:
+        type: integer
+      product_name:
+        type: string
+      quantity:
+        type: number
+    type: object
+  technician.Technician:
+    properties:
+      id_technician:
+        type: integer
+      name:
+        type: string
+    type: object
+  unity.Unity:
+    properties:
+      description:
+        type: string
+      id_unity:
+        type: integer
+    type: object
+  vehiclemake.VehicleMake:
+    properties:
+      id_make:
+        type: integer
+      name:
+        type: string
+    type: object
+  vehiclemodel.VehicleModel:
+    properties:
+      id_fuel:
+        type: integer
+      id_make:
+        type: integer
+      id_model:
+        type: integer
+      name:
+        type: string
+      version:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Service Order Images API
+  title: Badencar API
+  version: "1.0"
+paths:
+  /contacts:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/contact.Contact'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all contacts
+      tags:
+      - contacts
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/contact.Contact'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/contact.Contact'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a contact
+      tags:
+      - contacts
+  /contacts/{id}:
+    delete:
+      parameters:
+      - description: Contact ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a contact
+      tags:
+      - contacts
+    get:
+      parameters:
+      - description: Contact ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/contact.Contact'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a contact by ID
+      tags:
+      - contacts
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Contact ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/contact.Contact'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/contact.Contact'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a contact
+      tags:
+      - contacts
+  /customer-models:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/customermodel.CustomerModel'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all customer models
+      tags:
+      - customer-models
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/customermodel.CustomerModel'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/customermodel.CustomerModel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a customer model
+      tags:
+      - customer-models
+  /customer-models/{id}:
+    delete:
+      parameters:
+      - description: Customer Model ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a customer model
+      tags:
+      - customer-models
+    get:
+      parameters:
+      - description: Customer Model ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/customermodel.CustomerModel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a customer model by ID
+      tags:
+      - customer-models
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Customer Model ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/customermodel.CustomerModel'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/customermodel.CustomerModel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a customer model
+      tags:
+      - customer-models
+  /customers:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/customer.Customer'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all customers
+      tags:
+      - customers
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/customer.Customer'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/customer.Customer'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a customer
+      tags:
+      - customers
+  /customers/{id}:
+    delete:
+      parameters:
+      - description: Customer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a customer
+      tags:
+      - customers
+    get:
+      parameters:
+      - description: Customer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/customer.Customer'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a customer by ID
+      tags:
+      - customers
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Customer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/customer.Customer'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/customer.Customer'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a customer
+      tags:
+      - customers
+  /fuels:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/fuel.Fuel'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all fuels
+      tags:
+      - fuels
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/fuel.Fuel'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/fuel.Fuel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a fuel
+      tags:
+      - fuels
+  /fuels/{id}:
+    delete:
+      parameters:
+      - description: Fuel ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a fuel
+      tags:
+      - fuels
+    get:
+      parameters:
+      - description: Fuel ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/fuel.Fuel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a fuel by ID
+      tags:
+      - fuels
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Fuel ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/fuel.Fuel'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/fuel.Fuel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a fuel
+      tags:
+      - fuels
+  /inventory:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/inventory.Inventory'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all inventory products
+      tags:
+      - inventory
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/inventory.Inventory'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/inventory.Inventory'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create an inventory product
+      tags:
+      - inventory
+  /inventory/{id}:
+    delete:
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete an inventory product
+      tags:
+      - inventory
+    get:
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/inventory.Inventory'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get an inventory product by ID
+      tags:
+      - inventory
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/inventory.Inventory'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/inventory.Inventory'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update an inventory product
+      tags:
+      - inventory
+  /inventory/{id}/adjust:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: delta
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties:
+            type: integer
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Adjust current quantity of an inventory product
+      tags:
+      - inventory
+  /makes:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/vehiclemake.VehicleMake'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all vehicle makes
+      tags:
+      - makes
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/vehiclemake.VehicleMake'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/vehiclemake.VehicleMake'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a vehicle make
+      tags:
+      - makes
+  /makes/{id}:
+    delete:
+      parameters:
+      - description: Make ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a vehicle make
+      tags:
+      - makes
+    get:
+      parameters:
+      - description: Make ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/vehiclemake.VehicleMake'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a vehicle make by ID
+      tags:
+      - makes
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Make ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/vehiclemake.VehicleMake'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/vehiclemake.VehicleMake'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a vehicle make
+      tags:
+      - makes
+  /models:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/vehiclemodel.VehicleModel'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all vehicle models
+      tags:
+      - models
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/vehiclemodel.VehicleModel'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/vehiclemodel.VehicleModel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a vehicle model
+      tags:
+      - models
+  /models/{id}:
+    delete:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a vehicle model
+      tags:
+      - models
+    get:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/vehiclemodel.VehicleModel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a vehicle model by ID
+      tags:
+      - models
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/vehiclemodel.VehicleModel'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/vehiclemodel.VehicleModel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a vehicle model
+      tags:
+      - models
+  /operational-costs:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/operationalcosts.OperationalCost'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all operational costs
+      tags:
+      - operational-costs
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/operationalcosts.OperationalCost'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/operationalcosts.OperationalCost'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create an operational cost
+      tags:
+      - operational-costs
+  /operational-costs/{id}:
+    delete:
+      parameters:
+      - description: Operational Cost ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete an operational cost
+      tags:
+      - operational-costs
+    get:
+      parameters:
+      - description: Operational Cost ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/operationalcosts.OperationalCost'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get an operational cost by ID
+      tags:
+      - operational-costs
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Operational Cost ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/operationalcosts.OperationalCost'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/operationalcosts.OperationalCost'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update an operational cost
+      tags:
+      - operational-costs
+  /service-order-images:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/serviceorderimage.ServiceOrderImage'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all service order images
+      tags:
+      - service-order-images
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: Service Order ID
+        in: formData
+        name: id_order
+        type: integer
+      - description: Image file
+        in: formData
+        name: image
+        type: file
+      - description: Video file
+        in: formData
+        name: video
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/serviceorderimage.ServiceOrderImage'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a service order image
+      tags:
+      - service-order-images
+  /service-order-images/{id}:
+    delete:
+      parameters:
+      - description: Image ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a service order image
+      tags:
+      - service-order-images
+    get:
+      parameters:
+      - description: Image ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/serviceorderimage.ServiceOrderImage'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a service order image by ID
+      tags:
+      - service-order-images
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Image ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/serviceorderimage.ServiceOrderImage'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/serviceorderimage.ServiceOrderImage'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a service order image
+      tags:
+      - service-order-images
+  /service-order-images/{id}/file:
+    get:
+      parameters:
+      - description: Image ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Serve image file by image ID
+      tags:
+      - service-order-images
+  /service-order-images/order/{id_order}:
+    get:
+      parameters:
+      - description: Service Order ID
+        in: path
+        name: id_order
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/serviceorderimage.ServiceOrderImage'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List images metadata for an order
+      tags:
+      - service-order-images
+  /service-order-images/order/{id_order}/image:
+    get:
+      parameters:
+      - description: Service Order ID
+        in: path
+        name: id_order
+        required: true
+        type: integer
+      produces:
+      - application/zip
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get all images for an order as a ZIP
+      tags:
+      - service-order-images
+  /service-order-products:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/serviceorderproducts.ServiceOrderProduct'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all service order products
+      tags:
+      - service-order-products
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/serviceorderproducts.ServiceOrderProduct'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/serviceorderproducts.ServiceOrderProduct'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a service order product
+      tags:
+      - service-order-products
+  /service-order-products/{id}:
+    delete:
+      parameters:
+      - description: Service Order Product ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a service order product
+      tags:
+      - service-order-products
+    get:
+      parameters:
+      - description: Service Order Product ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/serviceorderproducts.ServiceOrderProduct'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a service order product by ID
+      tags:
+      - service-order-products
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Service Order Product ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/serviceorderproducts.ServiceOrderProduct'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/serviceorderproducts.ServiceOrderProduct'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a service order product
+      tags:
+      - service-order-products
+  /service-orders:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/serviceorder.ServiceOrder'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all service orders
+      tags:
+      - service-orders
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/serviceorder.ServiceOrder'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/serviceorder.ServiceOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a service order
+      tags:
+      - service-orders
+  /service-orders/{id}:
+    delete:
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a service order
+      tags:
+      - service-orders
+    get:
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/serviceorder.ServiceOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a service order by ID
+      tags:
+      - service-orders
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/serviceorder.ServiceOrder'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/serviceorder.ServiceOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a service order
+      tags:
+      - service-orders
+  /services:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/badencar-api_internal_domain_services.Service'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all services
+      tags:
+      - services
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/badencar-api_internal_domain_services.Service'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/badencar-api_internal_domain_services.Service'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a service
+      tags:
+      - services
+  /services/{id}:
+    delete:
+      parameters:
+      - description: Service ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a service
+      tags:
+      - services
+    get:
+      parameters:
+      - description: Service ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/badencar-api_internal_domain_services.Service'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a service by ID
+      tags:
+      - services
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Service ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/badencar-api_internal_domain_services.Service'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/badencar-api_internal_domain_services.Service'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a service
+      tags:
+      - services
+  /technicians:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/technician.Technician'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all technicians
+      tags:
+      - technicians
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/technician.Technician'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/technician.Technician'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a technician
+      tags:
+      - technicians
+  /technicians/{id}:
+    delete:
+      parameters:
+      - description: Technician ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a technician
+      tags:
+      - technicians
+    get:
+      parameters:
+      - description: Technician ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/technician.Technician'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a technician by ID
+      tags:
+      - technicians
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Technician ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/technician.Technician'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/technician.Technician'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a technician
+      tags:
+      - technicians
+  /unities:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/unity.Unity'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all unities
+      tags:
+      - unities
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/unity.Unity'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/unity.Unity'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a unity
+      tags:
+      - unities
+  /unities/{id}:
+    delete:
+      parameters:
+      - description: Unity ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a unity
+      tags:
+      - unities
+    get:
+      parameters:
+      - description: Unity ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/unity.Unity'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a unity by ID
+      tags:
+      - unities
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Unity ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/unity.Unity'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/unity.Unity'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a unity
+      tags:
+      - unities
+swagger: "2.0"
