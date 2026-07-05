@@ -18,6 +18,8 @@ export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComp
   const [search, setSearch] = useState('')
   const [detailItem, setDetailItem] = useState(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [sortKey, setSortKey] = useState(null)
+  const [sortDir, setSortDir] = useState('asc')
 
   const navigate = useNavigate()
 
@@ -86,9 +88,27 @@ export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComp
     await load()
   }
 
+  function handleSort(key) {
+    if (sortKey === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+    setCurrentPage(1)
+  }
+
   const filteredItems = items
     .filter(item => !filterKeys || !search.trim() || filterKeys.some(k => normalize(item[k]).includes(normalize(search))))
     .filter(item => !additionalFilter || additionalFilter(item))
+    .sort((a, b) => {
+      if (!sortKey) return 0
+      const av = a[sortKey] ?? ''
+      const bv = b[sortKey] ?? ''
+      const an = Number(av), bn = Number(bv)
+      const cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : String(av).localeCompare(String(bv))
+      return sortDir === 'asc' ? cmp : -cmp
+    })
 
   const totalPages = pageSize ? Math.max(1, Math.ceil(filteredItems.length / pageSize)) : 1
   const safePage = Math.min(currentPage, totalPages)
@@ -126,7 +146,18 @@ export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComp
         <table>
           <thead>
             <tr>
-              {fields.map(f => <th key={f.key} style={f.thStyle}>{f.label}</th>)}
+              {fields.map(f => (
+                <th
+                  key={f.key}
+                  style={{ ...f.thStyle, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                  onClick={() => handleSort(f.key)}
+                >
+                  {f.label}{' '}
+                  <span style={{ opacity: sortKey === f.key ? 1 : 0.35, fontSize: '0.75em' }}>
+                    {sortKey === f.key ? (sortDir === 'asc' ? '▲' : '▼') : '⬍'}
+                  </span>
+                </th>
+              ))}
               <th className="actions-col">Ações</th>
             </tr>
           </thead>

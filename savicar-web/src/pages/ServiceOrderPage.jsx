@@ -578,6 +578,10 @@ async function printServiceOrder(data, services, products, payments, inventoryIt
   const finalAmount = data.final_amount != null ? Number(data.final_amount) : totalAmount - discount
   const totalPago   = payments.reduce((acc, p) => acc + (p.payment_date ? Number(p.value || 0) : 0), 0)
   const totalAberto = finalAmount - totalPago
+  const totalTerceiros = services.reduce((acc, s) => {
+    const tn = s.technician_name
+    return (tn === 'Serviço de Terceiro' || tn === 'Serviços de Terceiro') ? acc + Number(s.total_value || 0) : acc
+  }, 0)
 
   const row = (label, value) => value != null && value !== '' ? `<tr><td class="lbl">${label}</td><td>${value}</td></tr>` : ''
   const rowPair = (l1, v1, l2, v2) => `<tr><td class="lbl">${l1}</td><td style="width:35%">${v1 ?? ''}</td><td class="lbl">${l2}</td><td>${v2 ?? ''}</td></tr>`
@@ -667,7 +671,7 @@ async function printServiceOrder(data, services, products, payments, inventoryIt
     <img src="${apiBase}/tenant-config/logo" class="logo" onerror="this.style.display='none'" />
     <div class="tenant-info">${tenantHtml}</div>
   </div>
-  <h1>Ordem de Serviço #${data.id_order}</h1>
+  <h1>${data.status === 0 ? 'Orçamento' : 'Ordem de Serviço'} #${data.id_order}</h1>
   <table class="info">
     ${data.customer_name || data.customer_phone ? `<tr><td class="lbl">Cliente</td><td>${[data.customer_name, data.customer_phone].filter(Boolean).join('&nbsp;&nbsp;|&nbsp;&nbsp;')}</td></tr>` : ''}
     ${rowPair('Modelo', data.model_name, 'Placa', data.plate_number)}
@@ -686,6 +690,7 @@ async function printServiceOrder(data, services, products, payments, inventoryIt
   <div class="totals">
     <table class="info">
       ${row('Total OS', fmt(totalAmount))}
+      ${totalTerceiros > 0 ? row('Serviços de Terceiros', fmt(totalTerceiros)) : ''}
       ${discount !== 0 ? row('Desconto', fmt(discount)) : ''}
       ${row('Valor Final', fmt(finalAmount))}
       ${row('Total Pago', fmt(totalPago))}
@@ -924,6 +929,12 @@ function StatusBadge({ value }) {
 
 const FIELDS = [
   { key: 'id_order', label: 'OS' },
+  { key: 'date_time_in', label: 'Data', thStyle: { whiteSpace: 'nowrap' }, render: val => {
+    if (!val) return ''
+    const [date, time] = String(val).split('T').length > 1 ? String(val).split('T') : String(val).split(' ')
+    const [y, m, d] = (date ?? '').split('-')
+    return `${d}/${m}/${y}${time ? ' ' + time.slice(0, 5) : ''}`
+  }},
   { key: 'customer_name', label: 'Cliente' },
   { key: 'model_name', label: 'Modelo' },
   { key: 'plate_number', label: 'Placa' },
@@ -2175,6 +2186,10 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
           return acc + (inv?.sales_price != null ? Number(inv.sales_price) * Number(p.quantity || 0) : 0)
         }, 0)
         const total = totalServices + totalProducts
+        const totalThirdParty = orderServices.reduce((acc, s) => {
+          const techName = technicians.find(t => t.id_technician === Number(s.id_technician))?.name ?? s.technician_name
+          return (techName === 'Serviço de Terceiro' || techName === 'Serviços de Terceiro') ? acc + (s.total_value != null ? Number(s.total_value) : 0) : acc
+        }, 0)
         const discount = Number(form.discount) || 0
         const finalAmount = total - discount
         const totalPago = orderPayments.reduce((acc, p) => acc + (p.payment_date ? Number(p.value || 0) : 0), 0)
@@ -2186,6 +2201,10 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
             <div className="form-group" style={{ flex: 'none' }}>
               <label><strong>Total OS</strong></label>
               <input type="text" value={fmt(total)} readOnly style={roStyle} />
+            </div>
+            <div className="form-group" style={{ flex: 'none' }}>
+              <label><strong>Serviços de Terceiros</strong></label>
+              <input type="text" value={fmt(totalThirdParty)} readOnly style={roStyle} />
             </div>
             <div className="form-group" style={{ flex: 'none' }}>
               <label><strong>Desconto</strong></label>

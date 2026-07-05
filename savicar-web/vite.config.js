@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
-    allowedHosts: ['all', 'www.savicar.com.br', ' 1790-200-50-219-64.ngrok-free.app'],
+    allowedHosts: ['all', 'www.savicar.com.br', 'c2b5-2804-30c-272b-d100-e1bf-5f08-474f-9fec.ngrok-free.app'],
     proxy: {
       // Forward all API calls to the local Go backend.
       // This means the browser only needs to reach the Vite (ngrok) origin —
