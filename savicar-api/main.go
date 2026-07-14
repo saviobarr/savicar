@@ -7,8 +7,10 @@ package main
 
 import (
 	"embed"
+	"io"
 	"io/fs"
 	"log"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -54,6 +56,7 @@ import (
 	"savicar-api/icon"
 	"savicar-api/internal/infrastructure/http/handler"
 	"savicar-api/internal/infrastructure/http/middleware"
+	"savicar-api/internal/infrastructure/externallookup"
 	"savicar-api/internal/infrastructure/persistence"
 	"savicar-api/internal/infrastructure/storage"
 	"github.com/getlantern/systray"
@@ -77,7 +80,32 @@ func serveEmbedded(c *gin.Context, subFS fs.FS, path string) {
 
 const uploadBasePath = "/home/savio/savicar-img"
 
+// setupLogging writes slog output to both stderr and a log file next to the
+// running executable. The packaged .exe is built with -H windowsgui (no
+// console window), so without this, errors are otherwise invisible once deployed.
+func setupLogging() *os.File {
+	exePath, err := os.Executable()
+	logPath := "savicar-api.log"
+	if err == nil {
+		logPath = filepath.Join(filepath.Dir(exePath), "savicar-api.log")
+	}
+
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Printf("could not open log file %s: %v (logging to stderr only)", logPath, err)
+		return nil
+	}
+
+	writer := io.MultiWriter(os.Stderr, logFile)
+	slog.SetDefault(slog.New(slog.NewTextHandler(writer, nil)))
+	log.SetOutput(writer)
+	return logFile
+}
+
 func main() {
+	if logFile := setupLogging(); logFile != nil {
+		defer logFile.Close()
+	}
 
 	conn, err := db.ConnectDb()
 	if err != nil {
@@ -133,7 +161,10 @@ func main() {
 
 	// Inventory
 	inventoryRepo := persistence.NewSQLServerInventoryRepository(conn)
-	inventorySvc := appinventory.NewService(inventoryRepo)
+	inventorySvc := appinventory.NewService(inventoryRepo, externallookup.NewChainLookup(
+		externallookup.NewCosmosClient(),
+		externallookup.NewUPCItemDBClient(),
+	))
 	inventoryHandler := handler.NewInventoryHandler(inventorySvc)
 
 	// Unity
@@ -156,10 +187,8 @@ func main() {
 	serviceAppointmentSvc := appserviceappointment.NewService(serviceAppointmentRepo, sarRepo)
 	serviceAppointmentHandler := handler.NewServiceAppointmentHandler(serviceAppointmentSvc)
 
-	// Service Order
+	// Service Order (wired after products repo below)
 	serviceOrderRepo := persistence.NewSQLServerServiceOrderRepository(conn)
-	serviceOrderSvc := appserviceorder.NewService(serviceOrderRepo)
-	serviceOrderHandler := handler.NewServiceOrderHandler(serviceOrderSvc)
 
 	// Services
 	servicesRepo := persistence.NewSQLServerServicesRepository(conn)
@@ -168,8 +197,12 @@ func main() {
 
 	// Service Order Products
 	serviceOrderProductsRepo := persistence.NewSQLServerServiceOrderProductsRepository(conn)
-	serviceOrderProductsSvc := appserviceorderproducts.NewService(serviceOrderProductsRepo, inventoryRepo)
+	serviceOrderProductsSvc := appserviceorderproducts.NewService(serviceOrderProductsRepo, inventoryRepo, serviceOrderRepo)
 	serviceOrderProductsHandler := handler.NewServiceOrderProductsHandler(serviceOrderProductsSvc)
+
+	// Service Order service wired after products repo
+	serviceOrderSvc := appserviceorder.NewService(serviceOrderRepo, serviceOrderProductsRepo, inventoryRepo)
+	serviceOrderHandler := handler.NewServiceOrderHandler(serviceOrderSvc)
 
 	// Payment Method
 	paymentMethodRepo := persistence.NewSQLServerPaymentMethodRepository(conn)
@@ -220,7 +253,7 @@ func main() {
 	tenantConfigRepo := persistence.NewSQLServerTenantConfigRepository(conn)
 	tenantConfigSvc := apptenantconfig.NewService(tenantConfigRepo)
 	tenantConfigHandler := handler.NewTenantConfigHandler(tenantConfigSvc)
-	whatsAppHandler := handler.NewWhatsAppHandler(tenantConfigSvc, conn)
+	whatsAppHandler := handler.NewWhatsAppHandler(tenantConfigSvc, serviceOrderSvc, paymentSvc, citySvc, stateSvc, conn)
 
 	r := gin.Default()
 	r.SetTrustedProxies(nil)

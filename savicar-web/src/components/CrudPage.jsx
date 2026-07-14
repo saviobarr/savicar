@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
+import { loadFilters, saveFilters } from '../filterStorage'
 
 function normalize(str) {
   return String(str ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 }
 
 export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComponent, createLabel = '+ Novo', idKey, filterKeys, filterPlaceholder = 'Filtrar...', DetailComponent, pageSize, closeOnOverlayClick = true, basePath, extraActions, extraFilters, additionalFilter, rowActions }) {
+  const storageKey = basePath || title
+  const initialFilters = loadFilters(storageKey, { search: '', currentPage: 1, sortKey: null, sortDir: 'asc' })
+
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -15,13 +19,17 @@ export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComp
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState(null)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(initialFilters.search)
   const [detailItem, setDetailItem] = useState(null)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [sortKey, setSortKey] = useState(null)
-  const [sortDir, setSortDir] = useState('asc')
+  const [currentPage, setCurrentPage] = useState(initialFilters.currentPage)
+  const [sortKey, setSortKey] = useState(initialFilters.sortKey)
+  const [sortDir, setSortDir] = useState(initialFilters.sortDir)
 
   const navigate = useNavigate()
+
+  useEffect(() => {
+    saveFilters(storageKey, { search, currentPage, sortKey, sortDir })
+  }, [storageKey, search, currentPage, sortKey, sortDir])
 
   const load = useCallback(async () => {
     setLoading(true)

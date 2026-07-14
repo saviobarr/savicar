@@ -238,6 +238,10 @@ export default function RelatorioOperacaoPage() {
                               <td style={{ textAlign: 'right', paddingBottom: '6px' }}>{fmt(o.product_cost)}</td>
                             </tr>
                             <tr>
+                              <td style={{ color: '#aaa', paddingBottom: '6px' }}>Desconto</td>
+                              <td style={{ textAlign: 'right', paddingBottom: '6px' }}>{fmt(o.discount)}</td>
+                            </tr>
+                            <tr>
                               <td style={{ color: '#aaa', paddingBottom: '6px' }}>
                                 <span>Técnico (comissão)</span>
                                 {o.technician_breakdown?.length > 0 && (

@@ -47,7 +47,8 @@ func (r *FinancialReportRepository) FindByPeriod(ctx context.Context, dateFrom, 
 				FROM SERVICES s
 				LEFT JOIN TECHNICIAN t ON t.ID_TECHNICIAN = s.ID_TECHNICIAN
 				WHERE s.ID_ORDER = so.ID_ORDER
-			), 0) AS technician_cost
+			), 0) AS technician_cost,
+			COALESCE(so.DISCOUNT, 0) AS discount
 		FROM SERVICE_ORDER so
 		LEFT JOIN CUSTOMER c ON c.ID_CUSTOMER = so.ID_CUSTOMER
 		WHERE DATE(so.DATE_TIME_IN) BETWEEN ? AND ?
@@ -70,13 +71,13 @@ func (r *FinancialReportRepository) FindByPeriod(ctx context.Context, dateFrom, 
 		if err := rows.Scan(
 			&o.IDOrder, &o.CustomerName,
 			&o.ServiceIncome, &o.ProductIncome,
-			&o.ProductCost, &o.TechnicianCost,
+			&o.ProductCost, &o.TechnicianCost, &o.Discount,
 		); err != nil {
 			return nil, err
 		}
 		o.TechnicianBreakdown = []financialreport.TechnicianCostItem{}
 		o.TotalIncome = o.ServiceIncome + o.ProductIncome
-		o.TotalCost = o.ProductCost + o.TechnicianCost
+		o.TotalCost = o.ProductCost + o.TechnicianCost + o.Discount
 		o.Result = o.TotalIncome - o.TotalCost
 
 		report.TotalIncome += o.TotalIncome

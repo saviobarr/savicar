@@ -4,6 +4,7 @@ import { getProfile, getUserId } from '../api'
 import { useNavigate, useLocation } from 'react-router-dom'
 import CrudPage from '../components/CrudPage'
 import { makeFormPages } from '../components/CrudFormPage'
+import { loadFilters, saveFilters } from '../filterStorage'
 import { CustomerForm } from './CustomerPage'
 import {
   fetchAllServiceOrder,
@@ -681,7 +682,6 @@ async function printServiceOrder(data, services, products, payments, inventoryIt
     ${row('Chassi (VIN)', data.vin)}
     ${row('Hodômetro (km)', data.odometer_reading)}
     ${row('Obs. do Cliente', data.customer_notes)}
-    ${row('Obs. Internas', data.internal_notes)}
     ${row('Diagnóstico', data.diagnosis_notes)}
   </table>
   ${servicesHtml}
@@ -1490,7 +1490,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
         service_type: form.service_type !== '' ? Number(form.service_type) : null,
         id_customer: form.id_customer !== '' ? Number(form.id_customer) : null,
         id_customer_model: form.id_customer_model !== '' ? Number(form.id_customer_model) : null,
-        id_technician: form.id_technician !== '' ? Number(form.id_technician) : null,
+        id_technician: form.id_technician !== '' && form.id_technician != null ? Number(form.id_technician) : null,
         odometer_reading: form.odometer_reading !== '' ? Number(form.odometer_reading) : null,
         date_time_in: fmtDatetime(form.date_time_in),
         total_amount: totalAmount,
@@ -1714,10 +1714,10 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
         <div className="form-group" style={{ flex: 1 }}>
           <label>Técnico Responsável</label>
           <SelectAutocomplete
-            items={technicians}
+            items={technicians.filter(t => t.id_user != null)}
             value={form.id_technician}
             onChange={val => setForm(prev => ({ ...prev, id_technician: val }))}
-            getId={t => t.id_technician}
+            getId={t => t.id_user}
             getLabel={t => t.name}
             placeholder="Digite o nome do técnico..."
           />
@@ -2395,13 +2395,16 @@ function WppSendModal({ order, onClose }) {
   )
 }
 
+const SO_FILTERS_KEY = '/service-orders:extra'
+
 export default function ServiceOrderPage() {
   const todayBR = isoToBR(new Date().toISOString().slice(0, 10))
-  const [fromDisplay, setFromDisplay] = useState(todayBR)
-  const [toDisplay,   setToDisplay]   = useState(todayBR)
+  const initialExtraFilters = loadFilters(SO_FILTERS_KEY, { fromDisplay: todayBR, toDisplay: todayBR, statusFilter: null })
+  const [fromDisplay, setFromDisplay] = useState(initialExtraFilters.fromDisplay)
+  const [toDisplay,   setToDisplay]   = useState(initialExtraFilters.toDisplay)
   const [sendWpp, setSendWpp] = useState(false)
   const [wppOrder, setWppOrder] = useState(null)
-  const [statusFilter, setStatusFilter] = useState(null) // null = all
+  const [statusFilter, setStatusFilter] = useState(initialExtraFilters.statusFilter) // null = all
   const [myTechnicianId, setMyTechnicianId] = useState(null)
   const fromPickerRef = useRef(null)
   const toPickerRef   = useRef(null)
@@ -2417,6 +2420,10 @@ export default function ServiceOrderPage() {
       }).catch(() => {})
     }
   }, [])
+
+  useEffect(() => {
+    saveFilters(SO_FILTERS_KEY, { fromDisplay, toDisplay, statusFilter })
+  }, [fromDisplay, toDisplay, statusFilter])
 
   const fromISO = brToISO(fromDisplay)
   const toISO   = brToISO(toDisplay)

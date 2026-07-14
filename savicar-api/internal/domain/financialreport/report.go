@@ -12,6 +12,7 @@ type OrderResult struct {
 	ProductIncome        float64              `json:"product_income"`
 	ProductCost          float64              `json:"product_cost"`
 	TechnicianCost       float64              `json:"technician_cost"`
+	Discount             float64              `json:"discount"`
 	TechnicianBreakdown  []TechnicianCostItem `json:"technician_breakdown"`
 	TotalIncome          float64              `json:"total_income"`
 	TotalCost            float64              `json:"total_cost"`

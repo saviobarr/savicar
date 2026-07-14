@@ -101,6 +101,45 @@ func (r *SQLServerInventoryRepository) FindByID(ctx context.Context, id int) (*i
 	return &inv, nil
 }
 
+func (r *SQLServerInventoryRepository) FindByBarcode(ctx context.Context, code string) (*inventory.Inventory, error) {
+	query := `SELECT i.ID_PRODUCT, i.NAME, i.CODE, i.PROVIDER, i.ID_MAKE, i.MAKER_CODE, i.PROVIDER_CODE,
+	 i.INTERNAL_CODE, i.ID_UNIT, u.DESCRIPTION, i.GROSS_WEIGHT, i.NET_WEIGHT, i.STORAGE_LOCATION,
+	 i.MIN, i.MAX, i.GTIN_EAN_CODE, i.ORIGINAL_NUMBER, i.SALES_PRICE, i.COST_PRICE, i.PRODUCT_SIZE,
+	 i.PRODUCT_ORIGIN, i.CLASSIFICATION_TYPE, i.INITIAL_INVENTORY_QUANTITY, i.CURRENT_QUANTITY, i.PRODUCT_DETAILS, i.IMAGE_PATH
+	 FROM INVENTORY i
+	 LEFT JOIN UNIT u ON u.ID_UNIT = i.ID_UNIT
+	 WHERE i.GTIN_EAN_CODE = ?`
+	var inv inventory.Inventory
+	err := r.db.QueryRowContext(ctx, query, code).Scan(
+		&inv.IDProduct, &inv.Name, &inv.Code, &inv.Provider, &inv.IDMake, &inv.MakerCode,
+		&inv.ProviderCode, &inv.InternalCode, &inv.IDUnity, &inv.UnityDescription,
+		&inv.GrossWeight, &inv.NetWeight, &inv.StorageLocation, &inv.Min, &inv.Max,
+		&inv.GtinEanCode, &inv.OriginalNumber, &inv.SalesPrice, &inv.CostPrice, &inv.ProductSize,
+		&inv.ProductOrigin, &inv.ClassificationType, &inv.InitialInventoryQuantity,
+		&inv.CurrentQuantity, &inv.ProductDetails, &inv.ImagePath,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		r.log.ErrorContext(ctx, "FindByBarcode failed", slog.String("code", code), slog.Any("error", err))
+		return nil, err
+	}
+	inv.Name = trimStringPtr(inv.Name)
+	inv.Code = trimStringPtr(inv.Code)
+	inv.Provider = trimStringPtr(inv.Provider)
+	inv.MakerCode = trimStringPtr(inv.MakerCode)
+	inv.ProviderCode = trimStringPtr(inv.ProviderCode)
+	inv.InternalCode = trimStringPtr(inv.InternalCode)
+	inv.UnityDescription = trimStringPtr(inv.UnityDescription)
+	inv.StorageLocation = trimStringPtr(inv.StorageLocation)
+	inv.GtinEanCode = trimStringPtr(inv.GtinEanCode)
+	inv.OriginalNumber = trimStringPtr(inv.OriginalNumber)
+	inv.ProductDetails = trimStringPtr(inv.ProductDetails)
+	inv.ImagePath = trimStringPtr(inv.ImagePath)
+	return &inv, nil
+}
+
 func (r *SQLServerInventoryRepository) Create(ctx context.Context, inv *inventory.Inventory) error {
 	query := `INSERT INTO INVENTORY
 	 (NAME, CODE, PROVIDER, ID_MAKE, MAKER_CODE, PROVIDER_CODE, INTERNAL_CODE, ID_UNIT,

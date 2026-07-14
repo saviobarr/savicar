@@ -67,18 +67,16 @@ func (r *SQLServerServiceOrderRepository) FindAll(ctx context.Context) ([]servic
 func (r *SQLServerServiceOrderRepository) FindByID(ctx context.Context, id int) (*serviceorder.ServiceOrder, error) {
 	query := `SELECT so.ID_ORDER, so.SERVICE_TYPE, so.ID_CUSTOMER_MODEL, so.DATE_TIME_IN, so.DATE_TIME_OUT,
 	 cm.PLATE, so.CUSTOMER_NOTES, so.INTERNAL_NOTES, so.ID_CUSTOMER,
-	 so.DIAGNOSIS_NOTES, so.ODOMETER_READING, so.ID_TECHNICIAN, t.NAME,
+	 so.DIAGNOSIS_NOTES, so.ODOMETER_READING, so.ID_USER, t.NAME,
 	 COALESCE(NULLIF(c.INDIVIDUAL_NAME, ''), NULLIF(c.TRADE_NAME, ''), NULLIF(c.LEGAL_NAME, '')),
-	 co.MOBILE_PHONE,
+	 (SELECT co.MOBILE_PHONE FROM CONTACT co WHERE co.ID_CUSTOMER = so.ID_CUSTOMER LIMIT 1),
 	 m.NAME, so.TOTAL_AMOUNT, so.DISCOUNT, so.FINAL_AMOUNT, so.STATUS
 	 FROM SERVICE_ORDER so
-	 LEFT JOIN TECHNICIAN t ON t.ID_TECHNICIAN = so.ID_TECHNICIAN
+	 LEFT JOIN TECHNICIAN t ON t.ID_USER = so.ID_USER
 	 LEFT JOIN CUSTOMER c ON c.ID_CUSTOMER = so.ID_CUSTOMER
-	 LEFT JOIN CONTACT co ON co.ID_CUSTOMER = so.ID_CUSTOMER
 	 LEFT JOIN CUSTOMER_MODEL cm ON cm.ID_CUSTOMER_MODEL = so.ID_CUSTOMER_MODEL
 	 LEFT JOIN MODEL m ON m.ID_MODEL = cm.ID_MODEL
-	 WHERE so.ID_ORDER = ?
-	 GROUP BY so.ID_ORDER`
+	 WHERE so.ID_ORDER = ?`
 	var so serviceorder.ServiceOrder
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&so.IDOrder, &so.ServiceType, &so.IDCustomerModel, &so.DateTimeIn, &so.DateTimeOut, &so.PlateNumber,

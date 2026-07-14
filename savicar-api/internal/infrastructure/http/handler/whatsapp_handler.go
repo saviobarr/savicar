@@ -2,6 +2,7 @@
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -10,12 +11,17 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-pdf/fpdf"
 	"golang.org/x/text/encoding/charmap"
 
+	appcity "savicar-api/internal/application/city"
+	apppayment "savicar-api/internal/application/payment"
+	appserviceorder "savicar-api/internal/application/serviceorder"
+	appstate "savicar-api/internal/application/state"
 	apptenant "savicar-api/internal/application/tenantconfig"
 )
 
@@ -29,13 +35,24 @@ var osStatusLabels = map[int]string{
 
 type WhatsAppHandler struct {
 	tenantSvc    *apptenant.Service
+	orderSvc     *appserviceorder.Service
+	paymentSvc   *apppayment.Service
+	citySvc      *appcity.Service
+	stateSvc     *appstate.Service
 	db           *sql.DB
 	evolutionURL string
 	evolutionKey string
 	log          *slog.Logger
 }
 
-func NewWhatsAppHandler(tenantSvc *apptenant.Service, db *sql.DB) *WhatsAppHandler {
+func NewWhatsAppHandler(
+	tenantSvc *apptenant.Service,
+	orderSvc *appserviceorder.Service,
+	paymentSvc *apppayment.Service,
+	citySvc *appcity.Service,
+	stateSvc *appstate.Service,
+	db *sql.DB,
+) *WhatsAppHandler {
 	url := os.Getenv("EVOLUTION_API_URL")
 	if url == "" {
 		url = "http://10.0.0.168:8081"
@@ -46,6 +63,10 @@ func NewWhatsAppHandler(tenantSvc *apptenant.Service, db *sql.DB) *WhatsAppHandl
 	}
 	return &WhatsAppHandler{
 		tenantSvc:    tenantSvc,
+		orderSvc:     orderSvc,
+		paymentSvc:   paymentSvc,
+		citySvc:      citySvc,
+		stateSvc:     stateSvc,
 		db:           db,
 		evolutionURL: url,
 		evolutionKey: key,
@@ -225,16 +246,24 @@ func (h *WhatsAppHandler) disconnect(c *gin.Context) {
 // ── sendOrder ─────────────────────────────────────────────────────────────────
 
 type osData struct {
-	IDOrder        int
-	CustomerName   string
-	ModelName      string
-	PlateNumber    string
-	DateTimeIn     string
-	CustomerNotes  string
-	DiagnosisNotes string
-	InternalNotes  string
-	Discount       float64
-	IDCustomer     int
+	IDOrder         int
+	Status          int
+	CustomerName    string
+	CustomerPhone   string
+	ModelName       string
+	PlateNumber     string
+	ServiceType     string
+	TechnicianName  string
+	DateTimeIn      string
+	DateTimeOut     string
+	OdometerReading string
+	CustomerNotes   string
+	DiagnosisNotes  string
+	InternalNotes   string
+	TotalAmount     float64
+	Discount        float64
+	FinalAmount     float64
+	IDCustomer      int
 }
 
 type osProduct struct {
@@ -245,7 +274,28 @@ type osProduct struct {
 
 type osService struct {
 	Description string
+	Hours       float64
+	UnitValue   float64
 	Total       float64
+	Technician  string
+}
+
+type osPayment struct {
+	Method      string
+	DueDate     string
+	PaymentDate string
+	Value       float64
+}
+
+type tenantHeader struct {
+	ExhibitionName string
+	Address        string
+	CityLine       string
+	Phone          string
+	Email          string
+	TaxID          string
+	LogoBytes      []byte
+	LogoExt        string
 }
 
 func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
@@ -260,44 +310,40 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	// ── 1. Fetch order ────────────────────────────────────────
-	var os osData
-	var modelName, plateNumber, customerNotes, diagnosisNotes, internalNotes, dateTimeIn sql.NullString
-	var discount sql.NullFloat64
-	var idCustomer sql.NullInt64
-
-	err := h.db.QueryRowContext(ctx, `
-		SELECT so.ID_ORDER,
-		       COALESCE(NULLIF(cu.INDIVIDUAL_NAME,''), NULLIF(cu.TRADE_NAME,''), NULLIF(cu.LEGAL_NAME,''), ''),
-		       COALESCE(m.NAME, ''),
-		       COALESCE(cm.PLATE, ''),
-		       so.DATE_TIME_IN,
-		       so.CUSTOMER_NOTES,
-		       so.DIAGNOSIS_NOTES,
-		       so.INTERNAL_NOTES,
-		       so.DISCOUNT,
-		       so.ID_CUSTOMER
-		FROM SERVICE_ORDER so
-		LEFT JOIN CUSTOMER cu  ON cu.ID_CUSTOMER         = so.ID_CUSTOMER
-		LEFT JOIN CUSTOMER_MODEL cm ON cm.ID_CUSTOMER_MODEL = so.ID_CUSTOMER_MODEL
-		LEFT JOIN MODEL m       ON m.ID_MODEL              = cm.ID_MODEL
-		WHERE so.ID_ORDER = ?`, body.OrderID).
-		Scan(&os.IDOrder, &os.CustomerName, &modelName, &plateNumber,
-			&dateTimeIn, &customerNotes, &diagnosisNotes, &internalNotes,
-			&discount, &idCustomer)
-	if err != nil {
+	// ── 1. Fetch order (same source used by the frontend print view) ──
+	order, err := h.orderSvc.GetByID(ctx, body.OrderID)
+	if err != nil || order == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
 		return
 	}
-	os.ModelName = modelName.String
-	os.PlateNumber = plateNumber.String
-	os.DateTimeIn = dateTimeIn.String
-	os.CustomerNotes = customerNotes.String
-	os.DiagnosisNotes = diagnosisNotes.String
-	os.InternalNotes = internalNotes.String
-	os.Discount = discount.Float64
-	if idCustomer.Valid {
-		os.IDCustomer = int(idCustomer.Int64)
+
+	data := osData{
+		IDOrder:        order.IDOrder,
+		Status:         derefInt(order.Status),
+		CustomerName:   derefStr(order.CustomerName),
+		CustomerPhone:  derefStr(order.CustomerPhone),
+		ModelName:      derefStr(order.ModelName),
+		PlateNumber:    derefStr(order.PlateNumber),
+		TechnicianName: derefStr(order.TechnicianName),
+		DateTimeIn:     derefStr(order.DateTimeIn),
+		DateTimeOut:    derefStr(order.DateTimeOut),
+		CustomerNotes:  derefStr(order.CustomerNotes),
+		DiagnosisNotes: derefStr(order.DiagnosisNotes),
+		InternalNotes:  derefStr(order.InternalNotes),
+		TotalAmount:    derefFloat(order.TotalAmount),
+		Discount:       derefFloat(order.Discount),
+		IDCustomer:     derefInt(order.IDCustomer),
+	}
+	if order.ServiceType != nil {
+		data.ServiceType = fmt.Sprintf("%d", *order.ServiceType)
+	}
+	if order.OdometerReading != nil {
+		data.OdometerReading = fmt.Sprintf("%d", *order.OdometerReading)
+	}
+	if order.FinalAmount != nil {
+		data.FinalAmount = *order.FinalAmount
+	} else {
+		data.FinalAmount = data.TotalAmount - data.Discount
 	}
 
 	// ── 2. Fetch products ─────────────────────────────────────
@@ -320,40 +366,61 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 		rows.Close()
 	}
 
-	// ── 3. Fetch services ─────────────────────────────────────
+	// ── 3. Fetch services (same columns shown in the print view) ──────
 	var services []osService
 	srows, err := h.db.QueryContext(ctx, `
-		SELECT COALESCE(DESCRICAO, ''), COALESCE(TOTAL_VALUE, 0)
-		FROM SERVICES WHERE ID_ORDER = ?`, body.OrderID)
+		SELECT COALESCE(s.DESCRICAO, ''), COALESCE(s.HOURS_QUANTITY, 0), COALESCE(s.UNIT_VALUE, 0), COALESCE(s.TOTAL_VALUE, 0), COALESCE(t.NAME, '')
+		FROM SERVICES s
+		LEFT JOIN TECHNICIAN t ON t.ID_TECHNICIAN = s.ID_TECHNICIAN
+		WHERE s.ID_ORDER = ?`, body.OrderID)
 	if err != nil {
 		h.log.Error("fetch services failed", slog.Int("order_id", body.OrderID), slog.Any("error", err))
 	} else {
 		for srows.Next() {
 			var s osService
-			if err := srows.Scan(&s.Description, &s.Total); err != nil {
+			if err := srows.Scan(&s.Description, &s.Hours, &s.UnitValue, &s.Total, &s.Technician); err != nil {
 				h.log.Error("scan service failed", slog.Any("error", err))
 			}
+			s.Technician = strings.TrimSpace(s.Technician)
 			services = append(services, s)
 		}
 		srows.Close()
 	}
 
-	// ── 4. Fetch customer WhatsApp phone ──────────────────────
+	// ── 4. Fetch payments ──────────────────────────────────────
+	var payments []osPayment
+	if orderPayments, err := h.paymentSvc.GetByOrderID(ctx, body.OrderID); err != nil {
+		h.log.Error("fetch payments failed", slog.Int("order_id", body.OrderID), slog.Any("error", err))
+	} else {
+		for _, p := range orderPayments {
+			payments = append(payments, osPayment{
+				Method:      derefStr(p.PaymentMethodDesc),
+				DueDate:     derefStr(p.DueDate),
+				PaymentDate: derefStr(p.PaymentDate),
+				Value:       derefFloat(p.Value),
+			})
+		}
+	}
+
+	// ── 5. Fetch tenant header (logo, address, contact) ────────────────
+	tenant := h.buildTenantHeader(ctx)
+
+	// ── 6. Fetch customer WhatsApp phone ──────────────────────
 	var phone string
-	if os.IDCustomer > 0 {
+	if data.IDCustomer > 0 {
 		// prefer a contact marked as WhatsApp
 		h.db.QueryRowContext(ctx, `
 			SELECT COALESCE(MOBILE_PHONE, '')
 			FROM CONTACT
 			WHERE ID_CUSTOMER = ? AND IS_MOBILE_PHONE_WHATSAPP = 1
-			LIMIT 1`, os.IDCustomer).Scan(&phone)
+			LIMIT 1`, data.IDCustomer).Scan(&phone)
 		// fallback to any mobile phone
 		if phone == "" {
 			h.db.QueryRowContext(ctx, `
 				SELECT COALESCE(MOBILE_PHONE, '')
 				FROM CONTACT
 				WHERE ID_CUSTOMER = ?
-				LIMIT 1`, os.IDCustomer).Scan(&phone)
+				LIMIT 1`, data.IDCustomer).Scan(&phone)
 		}
 	}
 	if phone == "" && body.PhoneOverride != "" {
@@ -365,14 +432,14 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 	}
 	phone = sanitizePhone(phone)
 
-	// ── 5. Generate PDF ───────────────────────────────────────
-	pdfBytes, err := buildOSPDF(os, products, services)
+	// ── 7. Generate PDF ───────────────────────────────────────
+	pdfBytes, err := buildOSPDF(data, products, services, payments, tenant)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate PDF: " + err.Error()})
 		return
 	}
 
-	// ── 6. Send via Evolution API ─────────────────────────────
+	// ── 8. Send via Evolution API ─────────────────────────────
 	instanceName, err := h.getInstanceName(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -383,9 +450,9 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 		"number":    phone,
 		"mediatype": "document",
 		"mimetype":  "application/pdf",
-		"caption":   fmt.Sprintf("Ordem de Serviço #%d — %s", os.IDOrder, os.CustomerName),
+		"caption":   fmt.Sprintf("Ordem de Serviço #%d — %s", data.IDOrder, data.CustomerName),
 		"media":     base64.StdEncoding.EncodeToString(pdfBytes),
-		"fileName":  fmt.Sprintf("OS_%d.pdf", os.IDOrder),
+		"fileName":  fmt.Sprintf("OS_%d.pdf", data.IDOrder),
 	}
 	sendBody, _ := json.Marshal(sendPayload)
 
@@ -405,6 +472,74 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"sent": true, "phone": phone})
+}
+
+// buildTenantHeader mirrors the frontend's tenant header lookup in printServiceOrder
+// (fetchTenantConfig + fetchAllCity + fetchAllState) so the PDF shows the same
+// logo/address/contact block as the printed document.
+func (h *WhatsAppHandler) buildTenantHeader(ctx context.Context) tenantHeader {
+	var tenant tenantHeader
+	cfg, err := h.tenantSvc.Get(ctx)
+	if err != nil || cfg == nil {
+		return tenant
+	}
+	tenant.ExhibitionName = derefStr(cfg.ExhibitionName)
+	tenant.Address = derefStr(cfg.Address)
+	tenant.Phone = derefStr(cfg.PhoneNumber)
+	tenant.Email = derefStr(cfg.Email)
+	tenant.TaxID = derefStr(cfg.TaxID)
+
+	if cfg.IDCity != nil {
+		if city, err := h.citySvc.GetByID(ctx, *cfg.IDCity); err == nil && city != nil {
+			cityName := derefStr(city.Name)
+			stateAbbr := ""
+			if city.IDState != nil {
+				if state, err := h.stateSvc.GetByID(ctx, *city.IDState); err == nil && state != nil {
+					stateAbbr = derefStr(state.Abbreviation)
+				}
+			}
+			tenant.CityLine = joinNonEmpty(" - ", cityName, stateAbbr)
+		}
+	}
+
+	if cfg.LogoPath != nil && *cfg.LogoPath != "" {
+		if b, err := os.ReadFile(*cfg.LogoPath); err == nil {
+			tenant.LogoBytes = b
+			tenant.LogoExt = strings.TrimPrefix(strings.ToLower(filepath.Ext(*cfg.LogoPath)), ".")
+		}
+	}
+	return tenant
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func derefInt(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+func derefFloat(v *float64) float64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+func joinNonEmpty(sep string, parts ...string) string {
+	var kept []string
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, sep)
 }
 
 func sanitizePhone(p string) string {
@@ -470,8 +605,21 @@ func fmtDateBR(dt string) string {
 	return dt
 }
 
-// buildOSPDF generates the service order PDF in memory.
-func buildOSPDF(os osData, products []osProduct, services []osService) ([]byte, error) {
+func fmtDateOnlyBR(d string) string {
+	if len(d) < 10 {
+		return ""
+	}
+	parts := strings.Split(d[:10], "-")
+	if len(parts) != 3 {
+		return ""
+	}
+	return parts[2] + "/" + parts[1] + "/" + parts[0]
+}
+
+// buildOSPDF generates the service order PDF in memory, mirroring the sections
+// and totals shown in the frontend's printServiceOrder view (ServiceOrderPage.jsx):
+// tenant header, order info, services, products, payments, totals and signature.
+func buildOSPDF(data osData, products []osProduct, services []osService, payments []osPayment, tenant tenantHeader) ([]byte, error) {
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetMargins(15, 15, 15)
 	pdf.AddPage()
@@ -479,19 +627,111 @@ func buildOSPDF(os osData, products []osProduct, services []osService) ([]byte, 
 	pageW, _ := pdf.GetPageSize()
 	contentW := pageW - 30 // left+right margins
 
-	// ── Header ────────────────────────────────────────────────
+	// ── Tenant header (logo + exhibition name/address/contact) ─────────
+	headerTop := pdf.GetY()
+	xText := 15.0
+	logoH := 0.0
+	if len(tenant.LogoBytes) > 0 && tenant.LogoExt != "" {
+		opt := fpdf.ImageOptions{ImageType: strings.ToUpper(tenant.LogoExt), ReadDpi: true}
+		info := pdf.RegisterImageOptionsReader("logo", opt, bytes.NewReader(tenant.LogoBytes))
+		if info != nil && pdf.Ok() && info.Height() > 0 {
+			logoH = 18.0
+			logoW := logoH * info.Width() / info.Height()
+			pdf.ImageOptions("logo", 15, headerTop, 0, logoH, false, opt, 0, "")
+			xText = 15 + logoW + 6
+		}
+	}
+	textW := contentW - (xText - 15)
+	const lineH = 5.0
+	textLines := 0
+	pdf.SetXY(xText, headerTop)
+	if tenant.ExhibitionName != "" {
+		pdf.SetFont("Helvetica", "B", 13)
+		pdf.SetTextColor(30, 30, 30)
+		pdf.CellFormat(textW, lineH, latin(tenant.ExhibitionName), "", 2, "L", false, 0, "")
+		textLines++
+	}
+	addrCity := joinNonEmpty(" — ", tenant.Address, tenant.CityLine)
+	if addrCity != "" {
+		pdf.SetFont("Helvetica", "", 9)
+		pdf.SetTextColor(80, 80, 80)
+		pdf.CellFormat(textW, lineH, latin(addrCity), "", 2, "L", false, 0, "")
+		textLines++
+	}
+	phoneMail := joinNonEmpty("   |   ", tenant.Phone, tenant.Email)
+	if phoneMail != "" {
+		pdf.SetFont("Helvetica", "", 9)
+		pdf.SetTextColor(80, 80, 80)
+		pdf.CellFormat(textW, lineH, latin(phoneMail), "", 2, "L", false, 0, "")
+		textLines++
+	}
+	if tenant.TaxID != "" {
+		pdf.SetFont("Helvetica", "", 9)
+		pdf.SetTextColor(80, 80, 80)
+		pdf.CellFormat(textW, lineH, latin("CNPJ/CPF: "+tenant.TaxID), "", 2, "L", false, 0, "")
+		textLines++
+	}
+	blockH := logoH
+	if h := float64(textLines) * lineH; h > blockH {
+		blockH = h
+	}
+	pdf.SetXY(15, headerTop+blockH+4)
+
+	// ── Title ────────────────────────────────────────────────
+	title := "Ordem de Servico"
+	if data.Status == 0 {
+		title = "Orcamento"
+	}
 	pdf.SetFont("Helvetica", "B", 16)
 	pdf.SetTextColor(30, 30, 30)
-	pdf.CellFormat(contentW, 10, fmt.Sprintf("Ordem de Servico #%d", os.IDOrder), "", 1, "L", false, 0, "")
+	pdf.CellFormat(contentW, 9, fmt.Sprintf("%s #%d", title, data.IDOrder), "", 1, "L", false, 0, "")
+	pdf.Ln(1)
 
-	pdf.SetFont("Helvetica", "", 11)
-	pdf.SetTextColor(80, 80, 80)
-	pdf.CellFormat(contentW, 7, "Cliente: "+latin(os.CustomerName), "", 1, "L", false, 0, "")
+	// ── Info rows (mirrors the print view's info table: labels sized
+	// to their text, value right beside them, empty values stay blank) ──
+	labelCell := func(label string) float64 {
+		pdf.SetFont("Helvetica", "B", 10)
+		pdf.SetTextColor(60, 60, 60)
+		txt := utf8ToLatin1(label)
+		w := pdf.GetStringWidth(txt) + 3
+		pdf.CellFormat(w, 6, txt, "", 0, "L", false, 0, "")
+		pdf.SetFont("Helvetica", "", 10)
+		pdf.SetTextColor(30, 30, 30)
+		return w
+	}
+	infoRow := func(label, value string) {
+		if strings.TrimSpace(value) == "" {
+			return
+		}
+		w := labelCell(label)
+		pdf.CellFormat(contentW-w, 6, utf8ToLatin1(value), "", 1, "L", false, 0, "")
+	}
+	infoRowPair := func(l1, v1, l2, v2 string) {
+		if strings.TrimSpace(v1) == "" && strings.TrimSpace(v2) == "" {
+			return
+		}
+		half := contentW / 2
+		w1 := labelCell(l1)
+		pdf.CellFormat(half-w1, 6, utf8ToLatin1(v1), "", 0, "L", false, 0, "")
+		w2 := labelCell(l2)
+		pdf.CellFormat(contentW-half-w2, 6, utf8ToLatin1(v2), "", 1, "L", false, 0, "")
+	}
+	multiRow := func(label, value string) {
+		if strings.TrimSpace(value) == "" {
+			return
+		}
+		w := labelCell(label)
+		pdf.MultiCell(contentW-w, 6, utf8ToLatin1(value), "", "L", false)
+	}
 
-	vehicle := strings.TrimSpace(os.ModelName + " " + os.PlateNumber)
-	pdf.CellFormat(contentW, 7, "Veiculo: "+latin(vehicle), "", 1, "L", false, 0, "")
-	pdf.CellFormat(contentW, 7, "Data de Entrada: "+latin(fmtDateBR(os.DateTimeIn)), "", 1, "L", false, 0, "")
-	pdf.Ln(4)
+	infoRow("Cliente", joinNonEmpty("   |   ", data.CustomerName, data.CustomerPhone))
+	infoRowPair("Modelo", data.ModelName, "Placa", data.PlateNumber)
+	infoRow("Data/Hora Entrada", fmtDateBR(data.DateTimeIn))
+	infoRow("Data/Hora Saida", fmtDateBR(data.DateTimeOut))
+	infoRow("Hodometro (km)", data.OdometerReading)
+	multiRow("Obs. do Cliente", data.CustomerNotes)
+	multiRow("Diagnostico", data.DiagnosisNotes)
+	pdf.Ln(3)
 
 	// ── Section helper ─────────────────────────────────────────
 	sectionHeader := func(title string) {
@@ -503,32 +743,38 @@ func buildOSPDF(os osData, products []osProduct, services []osService) ([]byte, 
 		pdf.SetFont("Helvetica", "", 10)
 	}
 
-	bodyText := func(label, value string) {
-		pdf.SetFont("Helvetica", "B", 10)
-		pdf.SetTextColor(60, 60, 60)
-		pdf.CellFormat(45, 6, label, "", 0, "L", false, 0, "")
-		pdf.SetFont("Helvetica", "", 10)
-		pdf.SetTextColor(30, 30, 30)
-		pdf.MultiCell(contentW-45, 6, value, "", "L", false)
+	// ── Services ───────────────────────────────────────────────
+	if len(services) > 0 {
+		sectionHeader("Servicos")
+		pdf.SetFont("Helvetica", "B", 9)
+		pdf.SetFillColor(230, 230, 230)
+		pdf.CellFormat(contentW*0.5, 6, "Descricao", "B", 0, "L", true, 0, "")
+		pdf.CellFormat(contentW*0.15, 6, "Horas", "B", 0, "C", true, 0, "")
+		pdf.CellFormat(contentW*0.175, 6, "Unit.", "B", 0, "R", true, 0, "")
+		pdf.CellFormat(contentW*0.175, 6, "Total", "B", 1, "R", true, 0, "")
+		pdf.SetFont("Helvetica", "", 9)
+		for i, s := range services {
+			fill := i%2 == 0
+			if fill {
+				pdf.SetFillColor(245, 245, 245)
+			} else {
+				pdf.SetFillColor(255, 255, 255)
+			}
+			pdf.CellFormat(contentW*0.5, 6, latin(s.Description), "", 0, "L", fill, 0, "")
+			pdf.CellFormat(contentW*0.15, 6, fmt.Sprintf("%.2f", s.Hours), "", 0, "C", fill, 0, "")
+			pdf.CellFormat(contentW*0.175, 6, fmtBRL(s.UnitValue), "", 0, "R", fill, 0, "")
+			pdf.CellFormat(contentW*0.175, 6, fmtBRL(s.Total), "", 1, "R", fill, 0, "")
+		}
+		pdf.Ln(2)
 	}
-
-	// ── Reclamação & Diagnóstico ───────────────────────────────
-	sectionHeader("Observacoes do Cliente")
-	pdf.SetFont("Helvetica", "", 10)
-	pdf.MultiCell(contentW, 6, latin(os.CustomerNotes), "", "L", false)
-	pdf.Ln(2)
-
-	sectionHeader("Diagnostico")
-	pdf.MultiCell(contentW, 6, latin(os.DiagnosisNotes), "", "L", false)
-	pdf.Ln(2)
 
 	// ── Products ───────────────────────────────────────────────
 	if len(products) > 0 {
-		sectionHeader("Pecas Utilizadas")
+		sectionHeader("Produtos")
 		pdf.SetFont("Helvetica", "B", 9)
 		pdf.SetFillColor(230, 230, 230)
 		pdf.SetTextColor(30, 30, 30)
-		pdf.CellFormat(contentW*0.5, 6, "Descricao", "B", 0, "L", true, 0, "")
+		pdf.CellFormat(contentW*0.5, 6, "Produto", "B", 0, "L", true, 0, "")
 		pdf.CellFormat(contentW*0.15, 6, "Qtd", "B", 0, "C", true, 0, "")
 		pdf.CellFormat(contentW*0.175, 6, "Unit.", "B", 0, "R", true, 0, "")
 		pdf.CellFormat(contentW*0.175, 6, "Total", "B", 1, "R", true, 0, "")
@@ -549,23 +795,31 @@ func buildOSPDF(os osData, products []osProduct, services []osService) ([]byte, 
 		pdf.Ln(2)
 	}
 
-	// ── Services ───────────────────────────────────────────────
-	if len(services) > 0 {
-		sectionHeader("Servicos Realizados")
+	// ── Payments ───────────────────────────────────────────────
+	totalPago := 0.0
+	if len(payments) > 0 {
+		sectionHeader("Pagamentos")
 		pdf.SetFont("Helvetica", "B", 9)
 		pdf.SetFillColor(230, 230, 230)
-		pdf.CellFormat(contentW*0.75, 6, "Descricao", "B", 0, "L", true, 0, "")
-		pdf.CellFormat(contentW*0.25, 6, "Total", "B", 1, "R", true, 0, "")
+		pdf.CellFormat(contentW*0.35, 6, "Forma", "B", 0, "L", true, 0, "")
+		pdf.CellFormat(contentW*0.2, 6, "Vencimento", "B", 0, "C", true, 0, "")
+		pdf.CellFormat(contentW*0.2, 6, "Pagamento", "B", 0, "C", true, 0, "")
+		pdf.CellFormat(contentW*0.25, 6, "Valor", "B", 1, "R", true, 0, "")
 		pdf.SetFont("Helvetica", "", 9)
-		for i, s := range services {
+		for i, p := range payments {
 			fill := i%2 == 0
 			if fill {
 				pdf.SetFillColor(245, 245, 245)
 			} else {
 				pdf.SetFillColor(255, 255, 255)
 			}
-			pdf.CellFormat(contentW*0.75, 6, latin(s.Description), "", 0, "L", fill, 0, "")
-			pdf.CellFormat(contentW*0.25, 6, fmtBRL(s.Total), "", 1, "R", fill, 0, "")
+			pdf.CellFormat(contentW*0.35, 6, latin(p.Method), "", 0, "L", fill, 0, "")
+			pdf.CellFormat(contentW*0.2, 6, fmtDateOnlyBR(p.DueDate), "", 0, "C", fill, 0, "")
+			pdf.CellFormat(contentW*0.2, 6, fmtDateOnlyBR(p.PaymentDate), "", 0, "C", fill, 0, "")
+			pdf.CellFormat(contentW*0.25, 6, fmtBRL(p.Value), "", 1, "R", fill, 0, "")
+			if p.PaymentDate != "" {
+				totalPago += p.Value
+			}
 		}
 		pdf.Ln(2)
 	}
@@ -573,18 +827,7 @@ func buildOSPDF(os osData, products []osProduct, services []osService) ([]byte, 
 	// ── Totals ─────────────────────────────────────────────────
 	sectionHeader("Valores")
 
-	totalPecas := 0.0
-	for _, p := range products {
-		totalPecas += p.Quantity * p.Price
-	}
-	totalServicos := 0.0
-	for _, s := range services {
-		totalServicos += s.Total
-	}
-	total := totalPecas + totalServicos
-	totalFinal := total - os.Discount
-
-	_ = bodyText // use helper below
+	totalAberto := data.FinalAmount - totalPago
 
 	valueRow := func(label string, value float64, bold bool) {
 		if bold {
@@ -592,31 +835,37 @@ func buildOSPDF(os osData, products []osProduct, services []osService) ([]byte, 
 		} else {
 			pdf.SetFont("Helvetica", "", 10)
 		}
-		pdf.CellFormat(contentW-50, 6, label, "", 0, "L", false, 0, "")
-		pdf.CellFormat(50, 6, fmtBRL(value), "", 1, "R", false, 0, "")
+		pdf.CellFormat(45, 6, label, "", 0, "L", false, 0, "")
+		pdf.CellFormat(35, 6, fmtBRL(value), "", 1, "R", false, 0, "")
 	}
 
-	valueRow("Pecas:", totalPecas, false)
-	valueRow("Mao de Obra:", totalServicos, false)
-	valueRow("Total:", total, false)
-	if os.Discount > 0 {
-		valueRow("Desconto:", os.Discount, false)
-	}
-	valueRow("Total Final:", totalFinal, true)
-	pdf.Ln(3)
-
-	// ── Observations ───────────────────────────────────────────
-	if os.InternalNotes != "" {
-		sectionHeader("Observacoes")
-		pdf.SetFont("Helvetica", "", 10)
-		pdf.MultiCell(contentW, 6, latin(os.InternalNotes), "", "L", false)
+	totalTerceiros := 0.0
+	for _, s := range services {
+		if s.Technician == "Serviço de Terceiro" || s.Technician == "Serviços de Terceiro" {
+			totalTerceiros += s.Total
+		}
 	}
 
-	// ── Footer ─────────────────────────────────────────────────
+	valueRow("Total OS:", data.TotalAmount, false)
+	if totalTerceiros > 0 {
+		valueRow(utf8ToLatin1("Serviços de Terceiros:"), totalTerceiros, false)
+	}
+	if data.Discount != 0 {
+		valueRow("Desconto:", data.Discount, false)
+	}
+	valueRow("Valor Final:", data.FinalAmount, true)
+	valueRow("Total Pago:", totalPago, false)
+	valueRow("Total Aberto:", totalAberto, false)
 	pdf.Ln(6)
-	pdf.SetFont("Helvetica", "I", 8)
-	pdf.SetTextColor(150, 150, 150)
-	pdf.CellFormat(contentW, 6, "Obrigado pela preferencia!", "", 1, "C", false, 0, "")
+
+	// ── Signature ────────────────────────────────────────────────
+	pdf.SetFont("Helvetica", "", 10)
+	pdf.SetTextColor(30, 30, 30)
+	pdf.CellFormat(contentW, 6, latin("Blumenau _____ de ______________ de 20_______"), "", 1, "L", false, 0, "")
+	pdf.Ln(10)
+	pdf.CellFormat(contentW, 6, latin("Ciente e de acordo"), "", 1, "L", false, 0, "")
+	pdf.Ln(2)
+	pdf.CellFormat(contentW, 6, latin("Assinatura cliente/seguradora: ______________________________"), "", 1, "L", false, 0, "")
 
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {

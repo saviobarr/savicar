@@ -21,6 +21,8 @@ func NewInventoryHandler(svc *inventorysvc.Service) *InventoryHandler {
 func (h *InventoryHandler) RegisterRoutes(r gin.IRouter) {
 	g := r.Group("/inventory")
 	g.GET("", h.getAll)
+	g.GET("/barcode/:code", h.getByBarcode)
+	g.GET("/external-lookup/:code", h.getExternalLookup)
 	g.GET("/:id", h.getByID)
 	g.POST("", h.create)
 	g.PUT("/:id", h.update)
@@ -63,6 +65,41 @@ func (h *InventoryHandler) getByID(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, item)
+}
+
+// @Summary     Get an inventory product by barcode (GTIN/EAN)
+// @Tags        inventory
+// @Produce     json
+// @Param       code path     string true "GTIN/EAN barcode"
+// @Success     200  {object} inventory.Inventory
+// @Failure     404  {object} map[string]string
+// @Router      /inventory/barcode/{code} [get]
+func (h *InventoryHandler) getByBarcode(c *gin.Context) {
+	code := c.Param("code")
+	item, err := h.svc.GetByBarcode(c.Request.Context(), code)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
+// @Summary     Look up basic product info by barcode in an external product database
+// @Description Used when the barcode isn't found in the local inventory, to help pre-fill a new product's registration.
+// @Tags        inventory
+// @Produce     json
+// @Param       code path     string true "GTIN/EAN barcode"
+// @Success     200  {object} inventory.ExternalProduct
+// @Failure     404  {object} map[string]string
+// @Router      /inventory/external-lookup/{code} [get]
+func (h *InventoryHandler) getExternalLookup(c *gin.Context) {
+	code := c.Param("code")
+	product, err := h.svc.LookupExternal(c.Request.Context(), code)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, product)
 }
 
 // @Summary     Create an inventory product

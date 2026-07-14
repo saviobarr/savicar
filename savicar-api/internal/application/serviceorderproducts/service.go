@@ -5,16 +5,33 @@ import (
 	"fmt"
 
 	"savicar-api/internal/domain/inventory"
+	"savicar-api/internal/domain/serviceorder"
 	"savicar-api/internal/domain/serviceorderproducts"
 )
+
+const statusOrcamento = 0
 
 type Service struct {
 	repo      serviceorderproducts.Repository
 	inventory inventory.Repository
+	orders    serviceorder.Repository
 }
 
-func NewService(repo serviceorderproducts.Repository, inv inventory.Repository) *Service {
-	return &Service{repo: repo, inventory: inv}
+func NewService(repo serviceorderproducts.Repository, inv inventory.Repository, orders serviceorder.Repository) *Service {
+	return &Service{repo: repo, inventory: inv, orders: orders}
+}
+
+// isOrcamento returns true when the service order linked to sop is in "Orçamento" status,
+// meaning inventory should not be touched.
+func (s *Service) isOrcamento(ctx context.Context, orderID *int) bool {
+	if orderID == nil {
+		return false
+	}
+	so, err := s.orders.FindByID(ctx, *orderID)
+	if err != nil || so == nil || so.Status == nil {
+		return false
+	}
+	return *so.Status == statusOrcamento
 }
 
 func (s *Service) GetAll(ctx context.Context) ([]serviceorderproducts.ServiceOrderProduct, error) {
@@ -40,7 +57,7 @@ func (s *Service) Create(ctx context.Context, sop *serviceorderproducts.ServiceO
 	if err := s.repo.Create(ctx, sop); err != nil {
 		return err
 	}
-	if sop.IDProduct != nil && sop.Quantity != nil {
+	if !s.isOrcamento(ctx, sop.IDOrder) && sop.IDProduct != nil && sop.Quantity != nil {
 		_ = s.inventory.AdjustQuantity(ctx, *sop.IDProduct, -*sop.Quantity)
 	}
 	return nil
@@ -53,6 +70,9 @@ func (s *Service) Update(ctx context.Context, sop *serviceorderproducts.ServiceO
 	}
 	if err := s.repo.Update(ctx, sop); err != nil {
 		return err
+	}
+	if s.isOrcamento(ctx, sop.IDOrder) {
+		return nil
 	}
 	// revert old quantity, apply new quantity
 	if old != nil && old.IDProduct != nil && old.Quantity != nil {
@@ -72,8 +92,8 @@ func (s *Service) Delete(ctx context.Context, id int) error {
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
 	}
-	// restore quantity on delete
-	if old != nil && old.IDProduct != nil && old.Quantity != nil {
+	// restore quantity on delete only if not Orçamento
+	if old != nil && !s.isOrcamento(ctx, old.IDOrder) && old.IDProduct != nil && old.Quantity != nil {
 		_ = s.inventory.AdjustQuantity(ctx, *old.IDProduct, *old.Quantity)
 	}
 	return nil
