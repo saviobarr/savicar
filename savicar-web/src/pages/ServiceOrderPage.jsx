@@ -5,6 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import CrudPage from '../components/CrudPage'
 import { makeFormPages } from '../components/CrudFormPage'
 import { loadFilters, saveFilters } from '../filterStorage'
+import { matchesSearchQuery } from '../searchUtils'
 import { CustomerForm } from './CustomerPage'
 import {
   fetchAllServiceOrder,
@@ -171,8 +172,7 @@ function SelectAutocomplete({ items, value, onChange, getLabel, getId, placehold
       onChange('')
       return
     }
-    const lower = q.toLowerCase()
-    const matches = items.filter(i => (getLabel(i) || '').toLowerCase().includes(lower)).slice(0, maxSuggestions)
+    const matches = items.filter(i => matchesSearchQuery(getLabel(i) || '', q)).slice(0, maxSuggestions)
     openDropdown(matches)
   }
 

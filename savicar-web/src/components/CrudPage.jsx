@@ -2,10 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { loadFilters, saveFilters } from '../filterStorage'
-
-function normalize(str) {
-  return String(str ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
-}
+import { matchesSearchQuery } from '../searchUtils'
 
 export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComponent, createLabel = '+ Novo', idKey, filterKeys, filterPlaceholder = 'Filtrar...', DetailComponent, pageSize, closeOnOverlayClick = true, basePath, extraActions, extraFilters, additionalFilter, rowActions }) {
   const storageKey = basePath || title
@@ -107,7 +104,7 @@ export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComp
   }
 
   const filteredItems = items
-    .filter(item => !filterKeys || !search.trim() || filterKeys.some(k => normalize(item[k]).includes(normalize(search))))
+    .filter(item => !filterKeys || !search.trim() || matchesSearchQuery(filterKeys.map(k => item[k]).join(' '), search))
     .filter(item => !additionalFilter || additionalFilter(item))
     .sort((a, b) => {
       if (!sortKey) return 0
