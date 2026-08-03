@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import CrudPage from '../components/CrudPage'
 import { makeFormPages } from '../components/CrudFormPage'
+import { loadFilters, saveFilters } from '../filterStorage'
 import { NewCustomerModal, NewCarModal } from './ServiceOrderPage'
 import {
   fetchAllServiceAppointment,
@@ -315,16 +316,48 @@ const FIELDS = [
   { key: 'status',        label: 'Status',   render: v => <StatusBadge status={v} /> },
 ]
 
+// ── Draft persistence for the "new appointment" form ──────────
+// Lets a user navigate away mid-fill and resume later, since the
+// form lives on its own route (/appointments/new) that unmounts
+// (and loses all state) whenever the user leaves it.
+const APPOINTMENT_DRAFT_KEY = 'draft:/appointments/new'
+
+function loadAppointmentDraft() {
+  try {
+    const raw = sessionStorage.getItem(APPOINTMENT_DRAFT_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function saveAppointmentDraft(data) {
+  try {
+    sessionStorage.setItem(APPOINTMENT_DRAFT_KEY, JSON.stringify(data))
+  } catch {
+    // ignore storage errors (private browsing quota, etc.)
+  }
+}
+
+export function clearAppointmentDraft() {
+  try {
+    sessionStorage.removeItem(APPOINTMENT_DRAFT_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 // ── Form ──────────────────────────────────────────────────────
 export function ServiceAppointmentForm({ initialData, onSaved, onCancel }) {
   const isEdit = !!initialData
+  const draft = isEdit ? null : loadAppointmentDraft()
 
-  const [startAt,         setStartAt]         = useState(() => normalizeForDB(initialData?.start_at))
-  const [endAt,           setEndAt]           = useState(() => normalizeForDB(initialData?.end_at))
-  const [status,          setStatus]          = useState(initialData?.status   ?? '')
-  const [notes,           setNotes]           = useState(initialData?.notes    ?? '')
-  const [idCustomerModel, setIdCustomerModel] = useState(initialData?.id_customer_model ?? '')
-  const [idCustomer,      setIdCustomer]      = useState('')
+  const [startAt,         setStartAt]         = useState(() => draft?.startAt ?? normalizeForDB(initialData?.start_at))
+  const [endAt,           setEndAt]           = useState(() => draft?.endAt ?? normalizeForDB(initialData?.end_at))
+  const [status,          setStatus]          = useState(draft?.status ?? initialData?.status ?? '')
+  const [notes,           setNotes]           = useState(draft?.notes ?? initialData?.notes ?? '')
+  const [idCustomerModel, setIdCustomerModel] = useState(draft?.idCustomerModel ?? initialData?.id_customer_model ?? '')
+  const [idCustomer,      setIdCustomer]      = useState(draft?.idCustomer ?? '')
 
   const [customers,   setCustomers]   = useState([])
   const [allModels,   setAllModels]   = useState([])
@@ -360,11 +393,16 @@ export function ServiceAppointmentForm({ initialData, onSaved, onCancel }) {
 
   // ── Resources panel state ─────────────────────────────────
   const emptyResForm = { id_resource: '', id_technician: '' }
-  const [appointmentResources, setAppointmentResources] = useState([])
+  const [appointmentResources, setAppointmentResources] = useState(() => draft?.appointmentResources ?? [])
   const [editingRes,   setEditingRes]   = useState(null)
   const [resForm,      setResForm]      = useState(emptyResForm)
   const [resSaving,    setResSaving]    = useState(false)
   const [resError,     setResError]     = useState(null)
+
+  useEffect(() => {
+    if (isEdit) return
+    saveAppointmentDraft({ startAt, endAt, status, notes, idCustomerModel, idCustomer, appointmentResources })
+  }, [isEdit, startAt, endAt, status, notes, idCustomerModel, idCustomer, appointmentResources])
 
   useEffect(() => {
     fetchAllCustomer()
@@ -483,12 +521,18 @@ export function ServiceAppointmentForm({ initialData, onSaved, onCancel }) {
           })
         }
       }
+      if (!isEdit) clearAppointmentDraft()
       onSaved()
     } catch (err) {
       setError(err.message)
     } finally {
       setSaving(false)
     }
+  }
+
+  function handleCancel() {
+    if (!isEdit) clearAppointmentDraft()
+    onCancel()
   }
 
   return (
@@ -635,7 +679,7 @@ export function ServiceAppointmentForm({ initialData, onSaved, onCancel }) {
         <button type="submit" className="btn-novo" disabled={saving}>
           {saving ? 'Salvando...' : 'Salvar'}
         </button>
-        <button type="button" onClick={onCancel}>Cancelar</button>
+        <button type="button" onClick={handleCancel}>Cancelar</button>
       </div>
     </form>
   )
@@ -663,13 +707,29 @@ function todayBR() {
   return `${d}/${m}/${y}`
 }
 
+const APPOINTMENT_FILTERS_KEY = '/appointments:extra-filters'
+
 export default function ServiceAppointmentPage() {
   const navigate = useNavigate()
-  const [filterStatus,   setFilterStatus]   = useState('')
-  const [fromDisplay,    setFromDisplay]    = useState(todayBR)
-  const [toDisplay,      setToDisplay]      = useState(todayBR)
+  const initialAppointmentFilters = loadFilters(APPOINTMENT_FILTERS_KEY, {
+    filterStatus: '',
+    fromDisplay: todayBR(),
+    toDisplay: todayBR(),
+  })
+  const [filterStatus,   setFilterStatus]   = useState(initialAppointmentFilters.filterStatus)
+  const [fromDisplay,    setFromDisplay]    = useState(initialAppointmentFilters.fromDisplay)
+  const [toDisplay,      setToDisplay]      = useState(initialAppointmentFilters.toDisplay)
+  const [resumingDraft]  = useState(() => !!loadAppointmentDraft())
   const fromPickerRef = useRef(null)
   const toPickerRef   = useRef(null)
+
+  useEffect(() => {
+    if (resumingDraft) navigate('/appointments/new', { replace: true })
+  }, [])
+
+  useEffect(() => {
+    saveFilters(APPOINTMENT_FILTERS_KEY, { filterStatus, fromDisplay, toDisplay })
+  }, [filterStatus, fromDisplay, toDisplay])
 
   const fromISO = brDateToISO(fromDisplay)
   const toISO   = brDateToISO(toDisplay)
@@ -677,12 +737,16 @@ export default function ServiceAppointmentPage() {
   function additionalFilter(item) {
     if (filterStatus && String(item.status) !== filterStatus) return false
     const itemDate = item.start_at ? String(item.start_at).slice(0, 10) : ''
-    if (fromISO && itemDate < fromISO) return false
-    if (toISO   && itemDate > toISO)   return false
+    if (itemDate) {
+      if (fromISO && itemDate < fromISO) return false
+      if (toISO   && itemDate > toISO)   return false
+    }
     return true
   }
 
   const hasFilter = filterStatus || fromISO || toISO
+
+  if (resumingDraft) return null
 
   return (
     <CrudPage

@@ -11,7 +11,7 @@ export default defineConfig({
       // Forward all API calls to the local Go backend.
       // This means the browser only needs to reach the Vite (ngrok) origin —
       // the Go server never has to be exposed externally.
-      '^/(auth|service-orders|service-order-images|service-order-products|service-order-payments|services|payment-methods|payments|technicians|customers|contacts|customer-models|makes|fuels|models|countries|states|cities|unities|inventory|product-images|resources|appointments|appointment-resources|operational-costs|cost-categories|reports|tenant-config|whatsapp|users|audit)': {
+      '^/(auth|service-orders|service-order-images|service-order-products|service-order-payments|services|payment-methods|payments|technicians|customers|contacts|customer-models|makes|fuels|models|countries|states|cities|unities|inventory|product-images|resources|appointments|appointment-resources|operational-costs|cost-categories|reports|tenant-config|whatsapp|users|audit|nf|produtos-nf)': {
         target: 'http://localhost:8080',
         changeOrigin: true,
         secure: false,

@@ -959,26 +959,49 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
   const isEdit = !!orderId
   const isTecnico = getProfile() === 3
   const myUserId = getUserId()
-  const [form, setForm] = useState({
-    service_type: initialData?.service_type ?? '',
-    id_customer_model: initialData?.id_customer_model ?? '',
-    date_time_in: toDatetimeLocal(initialData?.date_time_in) || nowLocalISO(),
-    id_customer: initialData?.id_customer ?? '',
-    id_technician: initialData?.id_technician ?? '',
-    customer_notes: initialData?.customer_notes ?? '',
-    internal_notes: initialData?.internal_notes ?? '',
-    diagnosis_notes: initialData?.diagnosis_notes ?? '',
-    odometer_reading: initialData?.odometer_reading ?? '',
-    discount: initialData?.discount ?? '',
-    status: initialData?.status ?? 0,
+
+  // Draft autosave: preserves in-progress form data (e.g. while the user leaves
+  // to register a customer/vehicle elsewhere) so returning to this screen resumes
+  // instead of starting over. Scoped per-order for edits, single slot for new OS.
+  // Ignored when initialData carries a fresh prefill (e.g. "Abrir OS" from a
+  // customer) so a stale draft never clobbers that intentional context.
+  const draftKey = isEdit ? `so_draft_edit_${orderId}` : 'so_draft_new'
+  const [draft] = useState(() => {
+    if (!isEdit && initialData) return null
+    try {
+      const raw = sessionStorage.getItem(draftKey)
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
   })
-  const [dateTimeInDisplay, setDateTimeInDisplay] = useState(() => {
+
+  function defaultForm() {
+    return {
+      service_type: initialData?.service_type ?? '',
+      id_customer_model: initialData?.id_customer_model ?? '',
+      date_time_in: toDatetimeLocal(initialData?.date_time_in) || nowLocalISO(),
+      id_customer: initialData?.id_customer ?? '',
+      id_technician: initialData?.id_technician ?? '',
+      customer_notes: initialData?.customer_notes ?? '',
+      internal_notes: initialData?.internal_notes ?? '',
+      diagnosis_notes: initialData?.diagnosis_notes ?? '',
+      odometer_reading: initialData?.odometer_reading ?? '',
+      discount: initialData?.discount ?? '',
+      status: initialData?.status ?? 0,
+    }
+  }
+  function defaultDateTimeInDisplay() {
     const raw = toDatetimeLocal(initialData?.date_time_in) || nowLocalISO()
     if (!raw) return ''
     const [datePart, timePart] = raw.replace('T', ' ').split(' ')
     const [year, month, day] = datePart.split('-')
     return `${day}/${month}/${year}${timePart ? ' ' + timePart.slice(0, 5) : ''}`
-  })
+  }
+
+  const [draftDismissed, setDraftDismissed] = useState(false)
+  const [form, setForm] = useState(() => draft?.form ?? defaultForm())
+  const [dateTimeInDisplay, setDateTimeInDisplay] = useState(() => draft?.dateTimeInDisplay ?? defaultDateTimeInDisplay())
   const [customers, setCustomers] = useState([])
   const [allModels, setAllModels] = useState([])
   const [technicians, setTechnicians] = useState([])
@@ -990,7 +1013,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
 
   // ── Services panel ────────────────────────────────────────────
   const emptyServiceForm = { code: '', description: '', hours_quantity: '', unit_value: '', total_value: '', id_technician: '', status: '' }
-  const [orderServices, setOrderServices] = useState([])
+  const [orderServices, setOrderServices] = useState(() => (!isEdit && draft?.orderServices) || [])
   const [editingService, setEditingService] = useState(null)
   const [serviceForm, setServiceForm] = useState(emptyServiceForm)
   const [serviceSaving, setServiceSaving] = useState(false)
@@ -1000,7 +1023,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
   const emptyProductForm = { id_product: '', quantity: '' }
   const [inventoryItems, setInventoryItems] = useState([])
   const [productMakes, setProductMakes] = useState([])
-  const [orderProducts, setOrderProducts] = useState([])
+  const [orderProducts, setOrderProducts] = useState(() => (!isEdit && draft?.orderProducts) || [])
   const [editingProduct, setEditingProduct] = useState(null)
   const [productForm, setProductForm] = useState(emptyProductForm)
   const [productSaving, setProductSaving] = useState(false)
@@ -1026,7 +1049,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
     return d.toISOString().slice(0, 10)
   }
   const [paymentMethods, setPaymentMethods] = useState([])
-  const [orderPayments, setOrderPayments] = useState([])
+  const [orderPayments, setOrderPayments] = useState(() => (!isEdit && draft?.orderPayments) || [])
   const [editingPayment, setEditingPayment] = useState(null)
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm)
   const [paymentSaving, setPaymentSaving] = useState(false)
@@ -1035,6 +1058,35 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
   const [paymentDateDisplay, setPaymentDateDisplay] = useState('')
   const dueDatePickerRef = useRef(null)
   const paymentDatePickerRef = useRef(null)
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(draftKey, JSON.stringify({
+        form, dateTimeInDisplay, orderServices, orderProducts, orderPayments,
+      }))
+    } catch {}
+  }, [draftKey, form, dateTimeInDisplay, orderServices, orderProducts, orderPayments])
+
+  function clearDraft() {
+    try { sessionStorage.removeItem(draftKey) } catch {}
+  }
+
+  function handleCancel() {
+    clearDraft()
+    onCancel()
+  }
+
+  function discardDraft() {
+    clearDraft()
+    setDraftDismissed(true)
+    setForm(defaultForm())
+    setDateTimeInDisplay(defaultDateTimeInDisplay())
+    if (!isEdit) {
+      setOrderServices([])
+      setOrderProducts([])
+      setOrderPayments([])
+    }
+  }
 
   useEffect(() => {
     fetchAllCustomer().then(data => setCustomers((data ?? []).sort((a, b) => customerDisplayName(a).localeCompare(customerDisplayName(b), 'pt-BR', { sensitivity: 'base' })))).catch(() => {})
@@ -1553,6 +1605,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
       }
 
       if (overrideStatus != null) setForm(prev => ({ ...prev, status: overrideStatus }))
+      clearDraft()
       onSaved()
     } catch (err) {
       setError(err.message)
@@ -1576,6 +1629,25 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
 
   return (
     <form onSubmit={handleSubmit} className="crud-form">
+      {draft && !draftDismissed && (
+        <div style={{
+          background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
+          padding: '8px 14px', marginBottom: 16, display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', gap: '12px', fontSize: '0.85rem', color: '#cbd5e1',
+        }}>
+          <span>Rascunho anterior restaurado.</span>
+          <button
+            type="button"
+            onClick={discardDraft}
+            style={{
+              background: 'transparent', border: '1px solid #475569', borderRadius: 4,
+              color: '#cbd5e1', padding: '3px 10px', cursor: 'pointer', fontSize: '0.8rem', whiteSpace: 'nowrap',
+            }}
+          >
+            Descartar rascunho
+          </button>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap' }}>
         <div className="form-group" style={{ flex: 'none' }}>
           <label>Status</label>
@@ -1635,7 +1707,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
               {saving ? 'Salvando...' : form.status === 5 ? '✓ OS Concluída' : '✓ Fechar OS'}
             </button>
           )}
-          <button type="button" onClick={onCancel}>Cancelar</button>
+          <button type="button" onClick={handleCancel}>Cancelar</button>
         </div>
       </div>
       <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
@@ -2268,7 +2340,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
             {saving ? 'Salvando...' : form.status === 5 ? '✓ OS Concluída' : '✓ Fechar OS'}
           </button>
         )}
-        <button type="button" onClick={onCancel}>Cancelar</button>
+        <button type="button" onClick={handleCancel}>Cancelar</button>
       </div>
     </form>
   )

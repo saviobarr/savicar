@@ -8,6 +8,13 @@
       "cwd": "savicar-web",
       "port": 5173,
       "autoPort": true
+    },
+    {
+      "name": "savicar-api",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "main.go"],
+      "cwd": "savicar-api",
+      "port": 8080
     }
   ]
 }

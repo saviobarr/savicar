@@ -10,10 +10,11 @@ ERP automotivo self-hosted para oficinas mecânicas. Monorepo com backend Go e f
 savicar/
 ├── savicar-api/     # Backend Go (porta 8080)
 ├── savicar-web/     # Frontend React/Vite (porta 5173)
+├── build.ps1        # Script oficial de build de produção — ver seção "Build de produção"
 └── CLAUDE.md
 ```
 
-Deploy destino: `C:\work\badencar\deploy\`
+Build de produção: **sempre use `.\build.ps1`** (na raiz do repo), nunca `go build` manual. Veja a seção "Build de produção" abaixo.
 
 ---
 
@@ -23,11 +24,12 @@ Deploy destino: `C:\work\badencar\deploy\`
 
 ```bash
 cd savicar-api
-go run main.go                                          # Sobe a API na porta 8080
-go build -o C:\work\badencar\deploy\savicar-api.exe .  # Build de deploy Windows
-go mod tidy                                             # Atualizar dependências
-swag init                                               # Regenerar docs Swagger (requer swag CLI)
+go run main.go     # Sobe a API na porta 8080 (dev)
+go mod tidy         # Atualizar dependências
+swag init           # Regenerar docs Swagger (requer swag CLI)
 ```
+
+Para gerar o executável de produção, **não rode `go build` manualmente aqui** — use `.\build.ps1` na raiz do repo (seção "Build de produção").
 
 Não há suite de testes.
 
@@ -76,10 +78,10 @@ Siga o padrão do módulo `country` (mais simples):
 cd savicar-web
 npm install       # Instalar dependências
 npm run dev       # Dev server porta 5173
-npm run build     # Build de produção → dist/
+npm run build     # Build de produção → dist/ (uso local/preview)
 ```
 
-O build de produção vai para `savicar-web/dist/` e deve ser copiado para `C:\work\badencar\deploy\dist\`.
+`npm run build` sozinho **não** é o processo de deploy — o `dist/` gerado não é copiado/embutido automaticamente. Para gerar o executável final, use `.\build.ps1` na raiz do repo (seção "Build de produção"), que builda o frontend e já embute no binário Go.
 
 ### Stack real
 
@@ -100,6 +102,32 @@ O proxy do Vite cobre todos os prefixos de rota da API, incluindo `tenant-config
 - `src/App.jsx` — roteamento, sidebar, logo (carregada de `/tenant-config/logo`)
 - `src/pages/ServiceOrderPage.jsx` — página principal (~2300 linhas); contém `NewCarModal`, `WppSendModal`, `printServiceOrder`, `ServiceOrderDetailFull`
 - `src/components/CrudPage.jsx` + `CrudFormPage.jsx` — base reutilizável para páginas CRUD
+
+---
+
+## Build de produção
+
+```powershell
+cd C:\work\badencar\savicar
+.\build.ps1
+```
+
+O `main.go` do `savicar-api` embute o frontend via `//go:embed dist` (pasta `savicar-api/dist`) — o binário é self-contained, não serve arquivos de `savicar-web/dist` do disco. Por isso o build de produção **precisa** passar pelo `build.ps1`, que:
+
+1. Builda `savicar-web` (`npm run build`) **e** o frontend do projeto irmão `badencar`, em `C:\work\badencar\badencar\badencar-web` (repo separado, fora de `savicar/`).
+2. Copia cada `dist/` gerado para dentro de `savicar-api\dist\` antes de compilar (por isso a ordem importa — nunca rode `go build` manual em `savicar-api` sem antes colocar o `dist` certo lá).
+3. Gera ícone (`.ico`/`.syso` via `rsrc`, instalado automaticamente se faltar) e compila com `-H windowsgui -s -w` (sem janela de console).
+4. Ao final, restaura `savicar-api\dist\index.html` para um placeholder (`build placeholder`) — esse é o estado normal do arquivo no git; se você ver o `dist/` real ali fora de um build em andamento, foi rodado `go build` manual por engano.
+
+Saída:
+- `dist\savicar\savicar.exe` (branding Savicar)
+- `dist\badencar\badencar.exe` (mesmo backend, branding/frontend Badencar)
+
+---
+
+## Credenciais de desenvolvimento
+
+- **Login local (dev):** `admin` / `admin`
 
 ---
 
@@ -140,3 +168,4 @@ cloudflared tunnel run savicar   # Subir tunnel manualmente
 - Não chamar `persistence` diretamente nos handlers
 - Não colocar lógica de negócio nos handlers Gin
 - Não hardcodar `http://localhost:8080` no frontend — usar URL relativa
+- Não rodar `go build` manual para gerar o executável de produção — usar `.\build.ps1` (ver "Build de produção")

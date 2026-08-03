@@ -182,6 +182,7 @@ export default function TechnicianPage() {
       fetchAll={fetchAllTechnician}
       deleteItem={deleteTechnician}
       fields={FIELDS}
+      idKey="id_technician"
       FormComponent={TechnicianForm}
       basePath="/technicians"
     />

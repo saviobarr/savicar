@@ -36,10 +36,12 @@ import (
 	appfinancialreport "savicar-api/internal/application/financialreport"
 	appfuel "savicar-api/internal/application/fuel"
 	appinventory "savicar-api/internal/application/inventory"
+	appnf "savicar-api/internal/application/nf"
 	appoperationalcosts "savicar-api/internal/application/operationalcosts"
 	apppayment "savicar-api/internal/application/payment"
 	apppaymentmethod "savicar-api/internal/application/paymentmethod"
 	appproductimage "savicar-api/internal/application/productimage"
+	appprodutosnf "savicar-api/internal/application/produtosnf"
 	appresource "savicar-api/internal/application/resource"
 	appserviceappointment "savicar-api/internal/application/serviceappointment"
 	appsar "savicar-api/internal/application/serviceappointmentresource"
@@ -219,6 +221,16 @@ func main() {
 	countrySvc := appcountry.NewService(countryRepo)
 	countryHandler := handler.NewCountryHandler(countrySvc)
 
+	// NF (nota fiscal)
+	nfRepo := persistence.NewSQLServerNFRepository(conn)
+	nfSvc := appnf.NewService(nfRepo)
+	nfHandler := handler.NewNFHandler(nfSvc)
+
+	// Produtos NF
+	produtosNfRepo := persistence.NewSQLServerProdutosNfRepository(conn)
+	produtosNfSvc := appprodutosnf.NewService(produtosNfRepo)
+	produtosNfHandler := handler.NewProdutosNfHandler(produtosNfSvc)
+
 	// State
 	stateRepo := persistence.NewSQLServerStateRepository(conn)
 	stateSvc := appstate.NewService(stateRepo)
@@ -319,6 +331,8 @@ func main() {
 	paymentMethodHandler.RegisterRoutes(api)
 	paymentHandler.RegisterRoutes(api)
 	countryHandler.RegisterRoutes(api)
+	nfHandler.RegisterRoutes(api)
+	produtosNfHandler.RegisterRoutes(api)
 	stateHandler.RegisterRoutes(api)
 	cityHandler.RegisterRoutes(api)
 	operationalCostsHandler.RegisterRoutes(api)

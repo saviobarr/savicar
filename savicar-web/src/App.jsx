@@ -33,11 +33,13 @@ import ConfigurarWhatsAppPage from './pages/ConfigurarWhatsAppPage'
 import DadosEmpresaPage from './pages/DadosEmpresaPage'
 import UsersPage, { UserNewPage, UserEditPage } from './pages/UsersPage'
 import AuditPage from './pages/AuditPage'
+import NfPage, { NfNewPage, NfEditPage } from './pages/NfPage'
 import './App.css'
 
 const NAV_LINKS = [
   { to: '/appointments', label: 'Agendamento', highlight: true },
   { to: '/service-orders', label: 'Ordens de Serviço' },
+  { to: '/nf', label: 'Notas Fiscais' },
   { to: '/inventory', label: 'Estoque' },
   { to: '/technicians', label: 'Técnicos' },
   {
@@ -277,6 +279,10 @@ function AppShell() {
           <Route path="/service-orders/new" element={<ServiceOrderNewPage />} />
           <Route path="/service-orders/edit" element={<ServiceOrderEditPage />} />
           <Route path="/service-orders" element={<ServiceOrderPage />} />
+
+          <Route path="/nf/new" element={<NfNewPage />} />
+          <Route path="/nf/edit" element={<NfEditPage />} />
+          <Route path="/nf" element={<NfPage />} />
 
           <Route path="/services/new" element={<ServicesNewPage />} />
           <Route path="/services/edit" element={<ServicesEditPage />} />

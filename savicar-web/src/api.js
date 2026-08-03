@@ -684,3 +684,50 @@ export async function fetchAllAudit() {
   return res.json()
 }
 
+// ── NF ──────────────────────────────────────────────
+export async function fetchAllNf() {
+  const res = await apiFetch(`${BASE}/nf`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+export async function fetchNfById(numero) {
+  const res = await apiFetch(`${BASE}/nf/${numero}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+export async function createNf(data) {
+  const res = await apiFetch(`${BASE}/nf`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+export async function updateNf(numero, data) {
+  const res = await apiFetch(`${BASE}/nf/${numero}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+export async function deleteNf(numero) {
+  const res = await apiFetch(`${BASE}/nf/${numero}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+// ── ProdutoNf ───────────────────────────────────────
+export async function fetchProdutosNfByNf(numero) {
+  const res = await apiFetch(`${BASE}/produtos-nf/nf/${numero}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+export async function createProdutoNf(data) {
+  const res = await apiFetch(`${BASE}/produtos-nf`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+export async function updateProdutoNf(id, data) {
+  const res = await apiFetch(`${BASE}/produtos-nf/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+export async function deleteProdutoNf(id) {
+  const res = await apiFetch(`${BASE}/produtos-nf/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await res.text())
+}
+
