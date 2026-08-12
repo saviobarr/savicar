@@ -229,7 +229,10 @@ func (h *WhatsAppHandler) disconnect(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "evolution api unreachable: " + err.Error()})
 		return
 	}
-	if resp.StatusCode >= 400 {
+	// A 404 here means the instance is already gone on the provider side —
+	// treat it the same as a successful disconnect instead of leaving send_wpp
+	// stuck at 1 with no way to reconnect.
+	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
 		c.JSON(http.StatusBadGateway, gin.H{"error": string(raw)})
 		return
 	}

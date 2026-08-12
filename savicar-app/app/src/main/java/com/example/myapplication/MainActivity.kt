@@ -20,6 +20,7 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -93,7 +94,9 @@ private sealed class Screen {
     data object Home : Screen()
     data object Scanner : Screen()
     data object ServiceOrders : Screen()
+    data object NewServiceOrder : Screen()
     data class ServiceOrderImages(val order: ServiceOrderSummary) : Screen()
+    data object Settings : Screen()
 }
 
 class MainActivity : FragmentActivity() {
@@ -169,6 +172,7 @@ class MainActivity : FragmentActivity() {
                             is Screen.Home -> HomeScreen(
                                 onSelectScanner = { screen = Screen.Scanner },
                                 onSelectServiceOrders = { screen = Screen.ServiceOrders },
+                                onSelectSettings = { screen = Screen.Settings },
                                 onLogout = {
                                     token = null
                                     screen = Screen.Home
@@ -185,12 +189,28 @@ class MainActivity : FragmentActivity() {
                                 token = token!!,
                                 onBack = { screen = Screen.Home },
                                 onSelectOrder = { order -> screen = Screen.ServiceOrderImages(order) },
+                                onSelectNewOrder = { screen = Screen.NewServiceOrder },
+                            )
+                            is Screen.NewServiceOrder -> NewServiceOrderScreen(
+                                serverUrl = serverUrl,
+                                token = token!!,
+                                onBack = { screen = Screen.ServiceOrders },
+                                onCreated = { order -> screen = Screen.ServiceOrderImages(order) },
                             )
                             is Screen.ServiceOrderImages -> ServiceOrderImagesScreen(
                                 serverUrl = serverUrl,
                                 token = token!!,
                                 order = s.order,
                                 onBack = { screen = Screen.ServiceOrders },
+                            )
+                            is Screen.Settings -> SettingsScreen(
+                                initialServerUrl = serverUrl,
+                                onBack = { screen = Screen.Home },
+                                onSave = { newUrl ->
+                                    serverUrl = newUrl
+                                    prefs.edit().putString("server_url", newUrl).apply()
+                                    screen = Screen.Home
+                                },
                             )
                         }
                     }
@@ -455,7 +475,12 @@ class MainActivity : FragmentActivity() {
     }
 
     @Composable
-    private fun HomeScreen(onSelectScanner: () -> Unit, onSelectServiceOrders: () -> Unit, onLogout: () -> Unit) {
+    private fun HomeScreen(
+        onSelectScanner: () -> Unit,
+        onSelectServiceOrders: () -> Unit,
+        onSelectSettings: () -> Unit,
+        onLogout: () -> Unit,
+    ) {
         Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -477,10 +502,57 @@ class MainActivity : FragmentActivity() {
                     listOf(
                         Triple("📷", "Ler Código de Barras", onSelectScanner),
                         Triple("🔧", "Ordens de Serviço", onSelectServiceOrders),
+                        Triple("⚙️", "Configurações", onSelectSettings),
                     ),
                 ) { (icon, label, onClick) ->
                     HomeMenuCard(icon = icon, label = label, onClick = onClick)
                 }
+            }
+        }
+    }
+
+    @Composable
+    private fun SettingsScreen(
+        initialServerUrl: String,
+        onBack: () -> Unit,
+        onSave: (String) -> Unit,
+    ) {
+        var serverUrl by remember { mutableStateOf(initialServerUrl) }
+
+        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Configurações", style = MaterialTheme.typography.headlineSmall)
+                TextButton(onClick = onBack) { Text("← Voltar") }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            OutlinedTextField(
+                value = serverUrl,
+                onValueChange = { serverUrl = it },
+                label = { Text("Servidor (ex: http://192.168.0.10:8080)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "Endereço IP e porta do backend Savicar usado por este aparelho.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = { onSave(serverUrl.trimEnd('/')) },
+                enabled = serverUrl.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Salvar")
             }
         }
     }
@@ -516,6 +588,9 @@ class MainActivity : FragmentActivity() {
         var loading by remember { mutableStateOf(false) }
         var showRegisterDialog by remember { mutableStateOf(false) }
         var registerError by remember { mutableStateOf<String?>(null) }
+        var showStockEntryDialog by remember { mutableStateOf(false) }
+        var stockEntrySaving by remember { mutableStateOf(false) }
+        var stockEntryError by remember { mutableStateOf<String?>(null) }
 
         fun resetLookupState() {
             product = null
@@ -585,6 +660,13 @@ class MainActivity : FragmentActivity() {
                         Text(text = "Preço de venda: ${p.sales_price?.let { "R$ %.2f".format(it) } ?: "-"}")
                     }
                 }
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = { stockEntryError = null; showStockEntryDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Entrada Estoque")
+                }
             }
 
             externalSuggestion?.let { ext ->
@@ -642,6 +724,91 @@ class MainActivity : FragmentActivity() {
                 },
             )
         }
+
+        if (showStockEntryDialog && product != null) {
+            StockEntryDialog(
+                productName = product?.name ?: "(sem nome)",
+                currentQuantity = product?.current_quantity ?: 0,
+                saving = stockEntrySaving,
+                error = stockEntryError,
+                onDismiss = { showStockEntryDialog = false },
+                onConfirm = { quantity ->
+                    val p = product ?: return@StockEntryDialog
+                    stockEntrySaving = true
+                    stockEntryError = null
+                    lifecycleScope.launch {
+                        val result = withContext(Dispatchers.IO) { adjustInventoryQuantity(serverUrl, token, p.id_product, quantity) }
+                        stockEntrySaving = false
+                        result
+                            .onSuccess {
+                                product = p.copy(current_quantity = (p.current_quantity ?: 0) + quantity)
+                                showStockEntryDialog = false
+                            }
+                            .onFailure { stockEntryError = it.message ?: "Erro ao registrar entrada de estoque" }
+                    }
+                },
+            )
+        }
+    }
+
+    @Composable
+    private fun StockEntryDialog(
+        productName: String,
+        currentQuantity: Int,
+        saving: Boolean,
+        error: String?,
+        onDismiss: () -> Unit,
+        onConfirm: (Int) -> Unit,
+    ) {
+        var quantity by remember { mutableStateOf("") }
+        val quantityValue = quantity.toIntOrNull()
+
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Entrada Estoque") },
+            text = {
+                Column {
+                    Text(text = productName, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "Estoque atual: $currentQuantity",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = quantity,
+                        onValueChange = { quantity = it },
+                        label = { Text("Quantidade a adicionar") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (quantityValue != null && quantityValue > 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Novo estoque: ${currentQuantity + quantityValue}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (error != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = error, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                if (saving) {
+                    CircularProgressIndicator(modifier = Modifier.padding(8.dp))
+                } else {
+                    TextButton(
+                        enabled = quantityValue != null && quantityValue > 0,
+                        onClick = { onConfirm(quantityValue!!) },
+                    ) { Text("Confirmar") }
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        )
     }
 
     @Composable
@@ -749,6 +916,7 @@ class MainActivity : FragmentActivity() {
         token: String,
         onBack: () -> Unit,
         onSelectOrder: (ServiceOrderSummary) -> Unit,
+        onSelectNewOrder: () -> Unit,
     ) {
         var orders by remember { mutableStateOf<List<ServiceOrderSummary>>(emptyList()) }
         var loading by remember { mutableStateOf(true) }
@@ -782,6 +950,10 @@ class MainActivity : FragmentActivity() {
             ) {
                 Text(text = "Ordens de Serviço", style = MaterialTheme.typography.headlineSmall)
                 TextButton(onClick = onBack) { Text("← Voltar") }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = onSelectNewOrder, modifier = Modifier.fillMaxWidth()) {
+                Text("+ Abrir OS")
             }
             Spacer(modifier = Modifier.height(16.dp))
             OutlinedTextField(
@@ -820,6 +992,671 @@ class MainActivity : FragmentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    // ── New Service Order: "Abrir OS", mirrors the web ServiceOrderForm's
+    // customer/vehicle/technician selection for a quick-open flow on mobile.
+
+    @Composable
+    private fun NewServiceOrderScreen(
+        serverUrl: String,
+        token: String,
+        onBack: () -> Unit,
+        onCreated: (ServiceOrderSummary) -> Unit,
+    ) {
+        var customers by remember { mutableStateOf<List<CustomerBrief>>(emptyList()) }
+        var models by remember { mutableStateOf<List<CustomerModelBrief>>(emptyList()) }
+        var technicians by remember { mutableStateOf<List<TechnicianBrief>>(emptyList()) }
+        var vehicleMakes by remember { mutableStateOf<List<VehicleMakeBrief>>(emptyList()) }
+        var vehicleModels by remember { mutableStateOf<List<VehicleModelBrief>>(emptyList()) }
+        var loadingLists by remember { mutableStateOf(true) }
+        var loadError by remember { mutableStateOf<String?>(null) }
+
+        var selectedCustomer by remember { mutableStateOf<CustomerBrief?>(null) }
+        var selectedModel by remember { mutableStateOf<CustomerModelBrief?>(null) }
+        var selectedTechnician by remember { mutableStateOf<TechnicianBrief?>(null) }
+        var notes by remember { mutableStateOf("") }
+
+        var showCustomerPicker by remember { mutableStateOf(false) }
+        var showModelPicker by remember { mutableStateOf(false) }
+        var showTechnicianPicker by remember { mutableStateOf(false) }
+        var showNewCustomerDialog by remember { mutableStateOf(false) }
+        var newCustomerSaving by remember { mutableStateOf(false) }
+        var newCustomerError by remember { mutableStateOf<String?>(null) }
+        var showNewVehicleDialog by remember { mutableStateOf(false) }
+        var newVehicleSaving by remember { mutableStateOf(false) }
+        var newVehicleError by remember { mutableStateOf<String?>(null) }
+
+        var saving by remember { mutableStateOf(false) }
+        var error by remember { mutableStateOf<String?>(null) }
+
+        LaunchedEffect(Unit) {
+            val customersResult = withContext(Dispatchers.IO) { fetchCustomers(serverUrl, token) }
+            val modelsResult = withContext(Dispatchers.IO) { fetchCustomerModels(serverUrl, token) }
+            val techResult = withContext(Dispatchers.IO) { fetchTechnicians(serverUrl, token) }
+            val makesResult = withContext(Dispatchers.IO) { fetchVehicleMakes(serverUrl, token) }
+            val vehicleModelsResult = withContext(Dispatchers.IO) { fetchVehicleModels(serverUrl, token) }
+            loadingLists = false
+            customersResult.onSuccess { customers = it }.onFailure { loadError = it.message }
+            modelsResult.onFailure { loadError = loadError ?: it.message }
+            models = modelsResult.getOrDefault(emptyList())
+            technicians = techResult.getOrDefault(emptyList())
+            vehicleMakes = makesResult.getOrDefault(emptyList())
+            vehicleModels = vehicleModelsResult.getOrDefault(emptyList())
+        }
+
+        val modelsForCustomer = remember(models, selectedCustomer) {
+            val customerId = selectedCustomer?.id_customer
+            if (customerId == null) emptyList() else models.filter { it.id_customer == customerId }
+        }
+
+        LaunchedEffect(selectedCustomer) {
+            if (selectedModel != null && selectedModel?.id_customer != selectedCustomer?.id_customer) {
+                selectedModel = null
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Abrir OS", style = MaterialTheme.typography.headlineSmall)
+                TextButton(onClick = onBack) { Text("← Voltar") }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+
+            if (loadingLists) {
+                CircularProgressIndicator()
+            } else {
+                if (loadError != null) {
+                    Text(text = loadError!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 12.dp))
+                }
+
+                Text(text = "Cliente", style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { showCustomerPicker = true }, modifier = Modifier.weight(1f)) {
+                        Text(selectedCustomer?.let { customerLabel(it) } ?: "Selecionar cliente")
+                    }
+                    OutlinedButton(onClick = { newCustomerError = null; showNewCustomerDialog = true }) {
+                        Text("+ Novo")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(text = "Veículo", style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { showModelPicker = true },
+                        enabled = selectedCustomer != null,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            selectedModel?.let { modelLabel(it) }
+                                ?: if (selectedCustomer == null) "Selecione um cliente primeiro" else "Selecionar veículo",
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { newVehicleError = null; showNewVehicleDialog = true },
+                        enabled = selectedCustomer != null,
+                    ) {
+                        Text("+ Novo")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(text = "Técnico (opcional)", style = MaterialTheme.typography.labelLarge)
+                OutlinedButton(onClick = { showTechnicianPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(selectedTechnician?.let { technicianLabel(it) } ?: "Selecionar técnico")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Observações do cliente") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                )
+
+                if (error != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(text = error!!, color = MaterialTheme.colorScheme.error)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = {
+                        val customer = selectedCustomer
+                        val model = selectedModel
+                        if (customer == null || model == null) return@Button
+                        error = null
+                        saving = true
+                        lifecycleScope.launch {
+                            val request = NewServiceOrderRequest(
+                                id_customer = customer.id_customer,
+                                id_customer_model = model.id_customer_model,
+                                id_technician = selectedTechnician?.id_technician,
+                                date_time_in = nowSqlDateTime(),
+                                customer_notes = notes.ifBlank { null },
+                            )
+                            val result = withContext(Dispatchers.IO) { createServiceOrder(serverUrl, token, request) }
+                            saving = false
+                            result
+                                .onSuccess { created ->
+                                    onCreated(
+                                        ServiceOrderSummary(
+                                            id_order = created.id_order,
+                                            customer_name = customerLabel(customer),
+                                            model_name = model.model_name,
+                                            plate_number = model.plate,
+                                            status = 0,
+                                        ),
+                                    )
+                                }
+                                .onFailure { error = it.message ?: "Erro ao abrir OS" }
+                        }
+                    },
+                    enabled = selectedCustomer != null && selectedModel != null && !saving,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (saving) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Abrir OS")
+                    }
+                }
+            }
+        }
+
+        if (showCustomerPicker) {
+            PickerDialog(
+                title = "Selecionar cliente",
+                options = customers,
+                labelOf = { customerLabel(it) },
+                onSelect = {
+                    selectedCustomer = it
+                    showCustomerPicker = false
+                },
+                onDismiss = { showCustomerPicker = false },
+            )
+        }
+
+        if (showModelPicker) {
+            PickerDialog(
+                title = "Selecionar veículo",
+                options = modelsForCustomer,
+                labelOf = { modelLabel(it) },
+                onSelect = {
+                    selectedModel = it
+                    showModelPicker = false
+                },
+                onDismiss = { showModelPicker = false },
+            )
+        }
+
+        if (showTechnicianPicker) {
+            PickerDialog(
+                title = "Selecionar técnico",
+                options = technicians,
+                labelOf = { technicianLabel(it) },
+                onSelect = {
+                    selectedTechnician = it
+                    showTechnicianPicker = false
+                },
+                onDismiss = { showTechnicianPicker = false },
+            )
+        }
+
+        if (showNewCustomerDialog) {
+            NewCustomerDialog(
+                saving = newCustomerSaving,
+                error = newCustomerError,
+                onDismiss = { showNewCustomerDialog = false },
+                onConfirm = { request ->
+                    newCustomerSaving = true
+                    newCustomerError = null
+                    lifecycleScope.launch {
+                        val result = withContext(Dispatchers.IO) { createCustomer(serverUrl, token, request) }
+                        newCustomerSaving = false
+                        result
+                            .onSuccess { created ->
+                                val newCustomer = CustomerBrief(
+                                    id_customer = created.id_customer,
+                                    individual_name = request.individual_name,
+                                    trade_name = request.trade_name,
+                                    legal_name = request.legal_name,
+                                )
+                                customers = customers + newCustomer
+                                selectedCustomer = newCustomer
+                                showNewCustomerDialog = false
+                            }
+                            .onFailure { newCustomerError = it.message ?: "Erro ao cadastrar cliente" }
+                    }
+                },
+            )
+        }
+
+        if (showNewVehicleDialog && selectedCustomer != null) {
+            NewVehicleDialog(
+                idCustomer = selectedCustomer!!.id_customer,
+                makes = vehicleMakes,
+                models = vehicleModels,
+                saving = newVehicleSaving,
+                error = newVehicleError,
+                onDismiss = { showNewVehicleDialog = false },
+                onConfirm = { request, modelName ->
+                    newVehicleSaving = true
+                    newVehicleError = null
+                    lifecycleScope.launch {
+                        val result = withContext(Dispatchers.IO) { createCustomerModel(serverUrl, token, request) }
+                        newVehicleSaving = false
+                        result
+                            .onSuccess { created ->
+                                val newModel = CustomerModelBrief(
+                                    id_customer_model = created.id_customer_model,
+                                    id_customer = request.id_customer,
+                                    model_name = modelName,
+                                    plate = request.plate,
+                                )
+                                models = models + newModel
+                                selectedModel = newModel
+                                showNewVehicleDialog = false
+                            }
+                            .onFailure { newVehicleError = it.message ?: "Erro ao cadastrar veículo" }
+                    }
+                },
+            )
+        }
+    }
+
+    @Composable
+    private fun NewCustomerDialog(
+        saving: Boolean,
+        error: String?,
+        onDismiss: () -> Unit,
+        onConfirm: (NewCustomerRequest) -> Unit,
+    ) {
+        var isLegalPerson by remember { mutableStateOf(false) }
+        var individualName by remember { mutableStateOf("") }
+        var legalName by remember { mutableStateOf("") }
+        var tradeName by remember { mutableStateOf("") }
+        var taxId by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Novo Cliente") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = !isLegalPerson, onClick = { isLegalPerson = false })
+                        Text(
+                            text = "Pessoa Física",
+                            modifier = Modifier
+                                .clickable { isLegalPerson = false }
+                                .padding(end = 12.dp),
+                        )
+                        RadioButton(selected = isLegalPerson, onClick = { isLegalPerson = true })
+                        Text(
+                            text = "Pessoa Jurídica",
+                            modifier = Modifier.clickable { isLegalPerson = true },
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (isLegalPerson) {
+                        OutlinedTextField(
+                            value = legalName,
+                            onValueChange = { legalName = it },
+                            label = { Text("Razão Social") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = tradeName,
+                            onValueChange = { tradeName = it },
+                            label = { Text("Nome Fantasia") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = individualName,
+                            onValueChange = { individualName = it },
+                            label = { Text("Nome completo") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = taxId,
+                        onValueChange = { taxId = it },
+                        label = { Text(if (isLegalPerson) "CNPJ" else "CPF") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (error != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = error, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                if (saving) {
+                    CircularProgressIndicator(modifier = Modifier.padding(8.dp))
+                } else {
+                    TextButton(
+                        enabled = if (isLegalPerson) legalName.isNotBlank() else individualName.isNotBlank(),
+                        onClick = {
+                            onConfirm(
+                                NewCustomerRequest(
+                                    is_legal_person = isLegalPerson,
+                                    individual_name = individualName.ifBlank { null },
+                                    legal_name = legalName.ifBlank { null },
+                                    trade_name = tradeName.ifBlank { null },
+                                    tax_id = taxId.ifBlank { null },
+                                ),
+                            )
+                        },
+                    ) { Text("Salvar") }
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        )
+    }
+
+    @Composable
+    private fun NewVehicleDialog(
+        idCustomer: Int,
+        makes: List<VehicleMakeBrief>,
+        models: List<VehicleModelBrief>,
+        saving: Boolean,
+        error: String?,
+        onDismiss: () -> Unit,
+        onConfirm: (NewCustomerModelRequest, modelName: String?) -> Unit,
+    ) {
+        var selectedMake by remember { mutableStateOf<VehicleMakeBrief?>(null) }
+        var selectedModel by remember { mutableStateOf<VehicleModelBrief?>(null) }
+        var plate by remember { mutableStateOf("") }
+        var yearMake by remember { mutableStateOf("") }
+        var yearModel by remember { mutableStateOf("") }
+        var color by remember { mutableStateOf("") }
+        var showMakePicker by remember { mutableStateOf(false) }
+        var showModelPicker by remember { mutableStateOf(false) }
+
+        val modelsForMake = remember(models, selectedMake) {
+            val makeId = selectedMake?.id_make
+            if (makeId == null) emptyList() else models.filter { it.id_make == makeId }
+        }
+
+        LaunchedEffect(selectedMake) {
+            if (selectedModel != null && selectedModel?.id_make != selectedMake?.id_make) {
+                selectedModel = null
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Novo Veículo do Cliente") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(text = "Marca", style = MaterialTheme.typography.labelMedium)
+                    OutlinedButton(onClick = { showMakePicker = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(selectedMake?.name ?: "Selecionar marca")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "Modelo", style = MaterialTheme.typography.labelMedium)
+                    OutlinedButton(
+                        onClick = { showModelPicker = true },
+                        enabled = selectedMake != null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            selectedModel?.let { vehicleModelLabel(it) }
+                                ?: if (selectedMake == null) "Selecione uma marca primeiro" else "Selecionar modelo",
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = plate,
+                        onValueChange = { plate = it },
+                        label = { Text("Placa") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = yearMake,
+                        onValueChange = { yearMake = it },
+                        label = { Text("Ano Fabricação") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = yearModel,
+                        onValueChange = { yearModel = it },
+                        label = { Text("Ano Modelo") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = color,
+                        onValueChange = { color = it },
+                        label = { Text("Cor") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (error != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = error, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                if (saving) {
+                    CircularProgressIndicator(modifier = Modifier.padding(8.dp))
+                } else {
+                    TextButton(
+                        enabled = selectedModel != null,
+                        onClick = {
+                            val model = selectedModel ?: return@TextButton
+                            onConfirm(
+                                NewCustomerModelRequest(
+                                    id_customer = idCustomer,
+                                    id_model = model.id_model,
+                                    plate = plate.ifBlank { null },
+                                    year_make = yearMake.toIntOrNull(),
+                                    year_model = yearModel.toIntOrNull(),
+                                    color = color.ifBlank { null },
+                                ),
+                                vehicleModelLabel(model),
+                            )
+                        },
+                    ) { Text("Salvar") }
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        )
+
+        if (showMakePicker) {
+            PickerDialog(
+                title = "Selecionar marca",
+                options = makes,
+                labelOf = { it.name ?: "Marca #${it.id_make}" },
+                onSelect = {
+                    selectedMake = it
+                    showMakePicker = false
+                },
+                onDismiss = { showMakePicker = false },
+            )
+        }
+
+        if (showModelPicker) {
+            PickerDialog(
+                title = "Selecionar modelo",
+                options = modelsForMake,
+                labelOf = { vehicleModelLabel(it) },
+                onSelect = {
+                    selectedModel = it
+                    showModelPicker = false
+                },
+                onDismiss = { showModelPicker = false },
+            )
+        }
+    }
+
+    @Composable
+    private fun <T> PickerDialog(
+        title: String,
+        options: List<T>,
+        labelOf: (T) -> String,
+        onSelect: (T) -> Unit,
+        onDismiss: () -> Unit,
+    ) {
+        var query by remember { mutableStateOf("") }
+        val filtered = remember(options, query) {
+            if (query.isBlank()) options else options.filter { labelOf(it).contains(query, ignoreCase = true) }
+        }
+
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(title) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("Buscar") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                        if (filtered.isEmpty()) {
+                            item { Text(text = "Nenhum resultado", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
+                        items(filtered) { option ->
+                            Text(
+                                text = labelOf(option),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelect(option) }
+                                    .padding(vertical = 12.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        )
+    }
+
+    private suspend fun fetchCustomers(serverUrl: String, token: String): Result<List<CustomerBrief>> {
+        return try {
+            val response = api.getCustomers("$serverUrl/customers", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("Erro ao buscar clientes"))
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    private suspend fun fetchCustomerModels(serverUrl: String, token: String): Result<List<CustomerModelBrief>> {
+        return try {
+            val response = api.getCustomerModels("$serverUrl/customer-models", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("Erro ao buscar veículos"))
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    private suspend fun fetchTechnicians(serverUrl: String, token: String): Result<List<TechnicianBrief>> {
+        return try {
+            val response = api.getTechnicians("$serverUrl/technicians", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("Erro ao buscar técnicos"))
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    private suspend fun createServiceOrder(serverUrl: String, token: String, request: NewServiceOrderRequest): Result<ServiceOrderCreateResponse> {
+        return try {
+            val response = api.createServiceOrder("$serverUrl/service-orders", "Bearer $token", request)
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                Result.failure(Exception("Erro ao abrir OS (HTTP ${response.code()})"))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível abrir OS: ${e.message}"))
+        }
+    }
+
+    private suspend fun fetchVehicleMakes(serverUrl: String, token: String): Result<List<VehicleMakeBrief>> {
+        return try {
+            val response = api.getVehicleMakes("$serverUrl/makes", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("Erro ao buscar marcas"))
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    private suspend fun fetchVehicleModels(serverUrl: String, token: String): Result<List<VehicleModelBrief>> {
+        return try {
+            val response = api.getVehicleModels("$serverUrl/models", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("Erro ao buscar modelos"))
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    private suspend fun createCustomer(serverUrl: String, token: String, request: NewCustomerRequest): Result<CustomerCreateResponse> {
+        return try {
+            val response = api.createCustomer("$serverUrl/customers", "Bearer $token", request)
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                Result.failure(Exception("Erro ao cadastrar cliente (HTTP ${response.code()})"))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível cadastrar cliente: ${e.message}"))
+        }
+    }
+
+    private suspend fun createCustomerModel(serverUrl: String, token: String, request: NewCustomerModelRequest): Result<CustomerModelCreateResponse> {
+        return try {
+            val response = api.createCustomerModel("$serverUrl/customer-models", "Bearer $token", request)
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                Result.failure(Exception("Erro ao cadastrar veículo (HTTP ${response.code()})"))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível cadastrar veículo: ${e.message}"))
         }
     }
 
@@ -1135,6 +1972,23 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    private suspend fun adjustInventoryQuantity(serverUrl: String, token: String, idProduct: Int, delta: Int): Result<Unit> {
+        return try {
+            val response = api.adjustInventoryQuantity(
+                "$serverUrl/inventory/$idProduct/adjust",
+                "Bearer $token",
+                AdjustQuantityRequest(delta.toDouble()),
+            )
+            if (response.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("Erro ao registrar entrada (HTTP ${response.code()})"))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível registrar entrada: ${e.message}"))
+        }
+    }
+
     private suspend fun fetchServiceOrders(serverUrl: String, token: String): Result<List<ServiceOrderSummary>> {
         return try {
             val response = api.getServiceOrders("$serverUrl/service-orders", "Bearer $token")
@@ -1191,6 +2045,23 @@ private fun statusLabel(status: Int?): String = when (status) {
     4 -> "Em Teste"
     5 -> "Concluído"
     else -> "—"
+}
+
+private fun customerLabel(c: CustomerBrief): String =
+    c.individual_name ?: c.trade_name ?: c.legal_name ?: "Cliente #${c.id_customer}"
+
+private fun modelLabel(m: CustomerModelBrief): String =
+    "${m.model_name ?: "-"} · ${m.plate ?: "-"}"
+
+private fun technicianLabel(t: TechnicianBrief): String =
+    t.name ?: "Técnico #${t.id_technician}"
+
+private fun vehicleModelLabel(m: VehicleModelBrief): String =
+    (m.name ?: "-") + (if (!m.version.isNullOrBlank()) " ${m.version}" else "")
+
+private fun nowSqlDateTime(): String {
+    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+    return fmt.format(java.util.Date())
 }
 
 // Cap the longest side so huge camera photos don't blow up memory while
@@ -1254,6 +2125,8 @@ data class InventoryProduct(
 
 data class ExternalProduct(val name: String?, val brand: String?)
 
+data class AdjustQuantityRequest(val delta: Double)
+
 data class NewProductRequest(
     val name: String?,
     val code: String?,
@@ -1278,6 +2151,70 @@ data class ServiceOrderImageMeta(
     val image_path: String?,
 )
 
+data class CustomerBrief(
+    val id_customer: Int,
+    val individual_name: String?,
+    val trade_name: String?,
+    val legal_name: String?,
+)
+
+data class CustomerModelBrief(
+    val id_customer_model: Int,
+    val id_customer: Int,
+    val model_name: String?,
+    val plate: String?,
+)
+
+data class TechnicianBrief(
+    val id_technician: Int,
+    val name: String?,
+)
+
+data class NewServiceOrderRequest(
+    val id_customer: Int?,
+    val id_customer_model: Int?,
+    val id_technician: Int?,
+    val date_time_in: String?,
+    val customer_notes: String?,
+    val status: Int = 0,
+)
+
+data class ServiceOrderCreateResponse(val id_order: Int)
+
+data class VehicleMakeBrief(
+    val id_make: Int,
+    val name: String?,
+)
+
+data class VehicleModelBrief(
+    val id_model: Int,
+    val id_make: Int?,
+    val name: String?,
+    val version: String?,
+)
+
+data class NewCustomerRequest(
+    val is_legal_person: Boolean,
+    val is_active: Boolean = true,
+    val individual_name: String?,
+    val legal_name: String?,
+    val trade_name: String?,
+    val tax_id: String?,
+)
+
+data class CustomerCreateResponse(val id_customer: Int)
+
+data class NewCustomerModelRequest(
+    val id_customer: Int,
+    val id_model: Int,
+    val plate: String?,
+    val year_make: Int?,
+    val year_model: Int?,
+    val color: String?,
+)
+
+data class CustomerModelCreateResponse(val id_customer_model: Int)
+
 interface SavicarApi {
     @POST
     suspend fun login(@Url url: String, @Body body: LoginRequest): Response<LoginResponse>
@@ -1291,8 +2228,51 @@ interface SavicarApi {
     @POST
     suspend fun createProduct(@Url url: String, @Header("Authorization") auth: String, @Body body: NewProductRequest): Response<InventoryProduct>
 
+    @POST
+    suspend fun adjustInventoryQuantity(
+        @Url url: String,
+        @Header("Authorization") auth: String,
+        @Body body: AdjustQuantityRequest,
+    ): Response<Unit>
+
     @GET
     suspend fun getServiceOrders(@Url url: String, @Header("Authorization") auth: String): Response<List<ServiceOrderSummary>>
+
+    @POST
+    suspend fun createServiceOrder(
+        @Url url: String,
+        @Header("Authorization") auth: String,
+        @Body body: NewServiceOrderRequest,
+    ): Response<ServiceOrderCreateResponse>
+
+    @GET
+    suspend fun getCustomers(@Url url: String, @Header("Authorization") auth: String): Response<List<CustomerBrief>>
+
+    @GET
+    suspend fun getCustomerModels(@Url url: String, @Header("Authorization") auth: String): Response<List<CustomerModelBrief>>
+
+    @GET
+    suspend fun getTechnicians(@Url url: String, @Header("Authorization") auth: String): Response<List<TechnicianBrief>>
+
+    @GET
+    suspend fun getVehicleMakes(@Url url: String, @Header("Authorization") auth: String): Response<List<VehicleMakeBrief>>
+
+    @GET
+    suspend fun getVehicleModels(@Url url: String, @Header("Authorization") auth: String): Response<List<VehicleModelBrief>>
+
+    @POST
+    suspend fun createCustomer(
+        @Url url: String,
+        @Header("Authorization") auth: String,
+        @Body body: NewCustomerRequest,
+    ): Response<CustomerCreateResponse>
+
+    @POST
+    suspend fun createCustomerModel(
+        @Url url: String,
+        @Header("Authorization") auth: String,
+        @Body body: NewCustomerModelRequest,
+    ): Response<CustomerModelCreateResponse>
 
     @GET
     suspend fun getServiceOrderImages(@Url url: String, @Header("Authorization") auth: String): Response<List<ServiceOrderImageMeta>>
