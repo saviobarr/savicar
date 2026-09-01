@@ -8,4 +8,5 @@ type Repository interface {
 	Create(ctx context.Context, n *NF) error
 	Update(ctx context.Context, n *NF) error
 	Delete(ctx context.Context, numero int) error
+	GetMaxNumero(ctx context.Context) (int, error)
 }

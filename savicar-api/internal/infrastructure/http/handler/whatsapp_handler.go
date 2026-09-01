@@ -1,4 +1,4 @@
-﻿package handler
+package handler
 
 import (
 	"bytes"
@@ -146,8 +146,8 @@ func (h *WhatsAppHandler) createInstance(c *gin.Context) {
 	name := fmt.Sprintf("Savicar_%s", cfg.Name)
 	payload := map[string]any{
 		"instanceName": name,
-		"qrcode":      true,
-		"integration": "WHATSAPP-BAILEYS",
+		"qrcode":       true,
+		"integration":  "WHATSAPP-BAILEYS",
 	}
 	body, _ := json.Marshal(payload)
 
@@ -281,6 +281,7 @@ type osService struct {
 	UnitValue   float64
 	Total       float64
 	Technician  string
+	Status      int
 }
 
 type osPayment struct {
@@ -372,7 +373,7 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 	// ── 3. Fetch services (same columns shown in the print view) ──────
 	var services []osService
 	srows, err := h.db.QueryContext(ctx, `
-		SELECT COALESCE(s.DESCRICAO, ''), COALESCE(s.HOURS_QUANTITY, 0), COALESCE(s.UNIT_VALUE, 0), COALESCE(s.TOTAL_VALUE, 0), COALESCE(t.NAME, '')
+		SELECT COALESCE(s.DESCRICAO, ''), COALESCE(s.HOURS_QUANTITY, 0), COALESCE(s.UNIT_VALUE, 0), COALESCE(s.TOTAL_VALUE, 0), COALESCE(t.NAME, ''), COALESCE(s.STATUS, 0)
 		FROM SERVICES s
 		LEFT JOIN TECHNICIAN t ON t.ID_TECHNICIAN = s.ID_TECHNICIAN
 		WHERE s.ID_ORDER = ?`, body.OrderID)
@@ -381,7 +382,7 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 	} else {
 		for srows.Next() {
 			var s osService
-			if err := srows.Scan(&s.Description, &s.Hours, &s.UnitValue, &s.Total, &s.Technician); err != nil {
+			if err := srows.Scan(&s.Description, &s.Hours, &s.UnitValue, &s.Total, &s.Technician, &s.Status); err != nil {
 				h.log.Error("scan service failed", slog.Any("error", err))
 			}
 			s.Technician = strings.TrimSpace(s.Technician)
@@ -411,20 +412,7 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 	// ── 6. Fetch customer WhatsApp phone ──────────────────────
 	var phone string
 	if data.IDCustomer > 0 {
-		// prefer a contact marked as WhatsApp
-		h.db.QueryRowContext(ctx, `
-			SELECT COALESCE(MOBILE_PHONE, '')
-			FROM CONTACT
-			WHERE ID_CUSTOMER = ? AND IS_MOBILE_PHONE_WHATSAPP = 1
-			LIMIT 1`, data.IDCustomer).Scan(&phone)
-		// fallback to any mobile phone
-		if phone == "" {
-			h.db.QueryRowContext(ctx, `
-				SELECT COALESCE(MOBILE_PHONE, '')
-				FROM CONTACT
-				WHERE ID_CUSTOMER = ?
-				LIMIT 1`, data.IDCustomer).Scan(&phone)
-		}
+		phone = h.lookupCustomerPhone(ctx, data.IDCustomer)
 	}
 	if phone == "" && body.PhoneOverride != "" {
 		phone = body.PhoneOverride
@@ -475,6 +463,25 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"sent": true, "phone": phone})
+}
+
+// lookupCustomerPhone prefers a contact explicitly marked as WhatsApp,
+// falling back to any mobile phone on file for the customer.
+func (h *WhatsAppHandler) lookupCustomerPhone(ctx context.Context, idCustomer int) string {
+	var phone string
+	h.db.QueryRowContext(ctx, `
+		SELECT COALESCE(MOBILE_PHONE, '')
+		FROM CONTACT
+		WHERE ID_CUSTOMER = ? AND IS_MOBILE_PHONE_WHATSAPP = 1
+		LIMIT 1`, idCustomer).Scan(&phone)
+	if phone == "" {
+		h.db.QueryRowContext(ctx, `
+			SELECT COALESCE(MOBILE_PHONE, '')
+			FROM CONTACT
+			WHERE ID_CUSTOMER = ?
+			LIMIT 1`, idCustomer).Scan(&phone)
+	}
+	return phone
 }
 
 // buildTenantHeader mirrors the frontend's tenant header lookup in printServiceOrder
@@ -763,7 +770,11 @@ func buildOSPDF(data osData, products []osProduct, services []osService, payment
 			} else {
 				pdf.SetFillColor(255, 255, 255)
 			}
-			pdf.CellFormat(contentW*0.5, 6, latin(s.Description), "", 0, "L", fill, 0, "")
+			description := s.Description
+			if s.Status == 6 {
+				description += " - NÃO APROVADO, NÃO SERÁ COBRADO"
+			}
+			pdf.CellFormat(contentW*0.5, 6, latin(description), "", 0, "L", fill, 0, "")
 			pdf.CellFormat(contentW*0.15, 6, fmt.Sprintf("%.2f", s.Hours), "", 0, "C", fill, 0, "")
 			pdf.CellFormat(contentW*0.175, 6, fmtBRL(s.UnitValue), "", 0, "R", fill, 0, "")
 			pdf.CellFormat(contentW*0.175, 6, fmtBRL(s.Total), "", 1, "R", fill, 0, "")

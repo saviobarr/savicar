@@ -88,6 +88,15 @@ func (r *SQLServerOperationalCostsRepository) Create(ctx context.Context, c *ope
 	query := `
 		INSERT INTO OPERATIONAL_COSTS (ID_COST_CATEGORY, DESCRIPTION, AMOUNT, RECURRENCE, REFERENCE_DATE, DUE_DAY, ID_ORDER)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{
+		derefInt(c.IDCostCategory),
+		derefString(c.Description),
+		c.Amount,
+		derefInt(c.Recurrence),
+		derefString(c.ReferenceDate),
+		derefInt(c.DueDay),
+		derefInt(c.IDOrder),
+	}))
 	result, err := r.db.ExecContext(ctx, query,
 		derefInt(c.IDCostCategory),
 		derefString(c.Description),

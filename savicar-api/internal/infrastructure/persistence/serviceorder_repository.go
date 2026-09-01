@@ -1,4 +1,4 @@
-﻿package persistence
+package persistence
 
 import (
 	"context"
@@ -23,12 +23,12 @@ func NewSQLServerServiceOrderRepository(db *sql.DB) *SQLServerServiceOrderReposi
 func (r *SQLServerServiceOrderRepository) FindAll(ctx context.Context) ([]serviceorder.ServiceOrder, error) {
 	query := `SELECT so.ID_ORDER, so.SERVICE_TYPE, so.ID_CUSTOMER_MODEL, so.DATE_TIME_IN, so.DATE_TIME_OUT,
 	 cm.PLATE, so.CUSTOMER_NOTES, so.INTERNAL_NOTES, so.ID_CUSTOMER,
-	 so.DIAGNOSIS_NOTES, so.ODOMETER_READING, so.ID_USER, t.NAME,
+	 so.DIAGNOSIS_NOTES, so.ODOMETER_READING, so.ID_TECHNICIAN, t.NAME,
 	 COALESCE(NULLIF(c.INDIVIDUAL_NAME, ''), NULLIF(c.TRADE_NAME, ''), NULLIF(c.LEGAL_NAME, '')),
 	 (SELECT co.MOBILE_PHONE FROM CONTACT co WHERE co.ID_CUSTOMER = so.ID_CUSTOMER LIMIT 1),
-	 m.NAME, so.TOTAL_AMOUNT, so.DISCOUNT, so.FINAL_AMOUNT, so.STATUS
+	 m.NAME, so.TOTAL_AMOUNT, so.DISCOUNT, so.FINAL_AMOUNT, so.STATUS, so.ESTIMATED_DELIVERY_AT
 	 FROM SERVICE_ORDER so
-	 LEFT JOIN TECHNICIAN t ON t.ID_USER = so.ID_USER
+	 LEFT JOIN TECHNICIAN t ON t.ID_TECHNICIAN = so.ID_TECHNICIAN
 	 LEFT JOIN CUSTOMER c ON c.ID_CUSTOMER = so.ID_CUSTOMER
 	 LEFT JOIN CUSTOMER_MODEL cm ON cm.ID_CUSTOMER_MODEL = so.ID_CUSTOMER_MODEL
 	 LEFT JOIN MODEL m ON m.ID_MODEL = cm.ID_MODEL`
@@ -46,7 +46,7 @@ func (r *SQLServerServiceOrderRepository) FindAll(ctx context.Context) ([]servic
 			&so.IDOrder, &so.ServiceType, &so.IDCustomerModel, &so.DateTimeIn, &so.DateTimeOut, &so.PlateNumber,
 			&so.CustomerNotes, &so.InternalNotes, &so.IDCustomer, &so.DiagnosisNotes,
 			&so.OdometerReading, &so.IDTechnician, &so.TechnicianName, &so.CustomerName, &so.CustomerPhone,
-			&so.ModelName, &so.TotalAmount, &so.Discount, &so.FinalAmount, &so.Status,
+			&so.ModelName, &so.TotalAmount, &so.Discount, &so.FinalAmount, &so.Status, &so.EstimatedDeliveryAt,
 		); err != nil {
 			return nil, err
 		}
@@ -67,12 +67,12 @@ func (r *SQLServerServiceOrderRepository) FindAll(ctx context.Context) ([]servic
 func (r *SQLServerServiceOrderRepository) FindByID(ctx context.Context, id int) (*serviceorder.ServiceOrder, error) {
 	query := `SELECT so.ID_ORDER, so.SERVICE_TYPE, so.ID_CUSTOMER_MODEL, so.DATE_TIME_IN, so.DATE_TIME_OUT,
 	 cm.PLATE, so.CUSTOMER_NOTES, so.INTERNAL_NOTES, so.ID_CUSTOMER,
-	 so.DIAGNOSIS_NOTES, so.ODOMETER_READING, so.ID_USER, t.NAME,
+	 so.DIAGNOSIS_NOTES, so.ODOMETER_READING, so.ID_TECHNICIAN, t.NAME,
 	 COALESCE(NULLIF(c.INDIVIDUAL_NAME, ''), NULLIF(c.TRADE_NAME, ''), NULLIF(c.LEGAL_NAME, '')),
 	 (SELECT co.MOBILE_PHONE FROM CONTACT co WHERE co.ID_CUSTOMER = so.ID_CUSTOMER LIMIT 1),
-	 m.NAME, so.TOTAL_AMOUNT, so.DISCOUNT, so.FINAL_AMOUNT, so.STATUS
+	 m.NAME, so.TOTAL_AMOUNT, so.DISCOUNT, so.FINAL_AMOUNT, so.STATUS, so.ESTIMATED_DELIVERY_AT
 	 FROM SERVICE_ORDER so
-	 LEFT JOIN TECHNICIAN t ON t.ID_USER = so.ID_USER
+	 LEFT JOIN TECHNICIAN t ON t.ID_TECHNICIAN = so.ID_TECHNICIAN
 	 LEFT JOIN CUSTOMER c ON c.ID_CUSTOMER = so.ID_CUSTOMER
 	 LEFT JOIN CUSTOMER_MODEL cm ON cm.ID_CUSTOMER_MODEL = so.ID_CUSTOMER_MODEL
 	 LEFT JOIN MODEL m ON m.ID_MODEL = cm.ID_MODEL
@@ -82,7 +82,7 @@ func (r *SQLServerServiceOrderRepository) FindByID(ctx context.Context, id int) 
 		&so.IDOrder, &so.ServiceType, &so.IDCustomerModel, &so.DateTimeIn, &so.DateTimeOut, &so.PlateNumber,
 		&so.CustomerNotes, &so.InternalNotes, &so.IDCustomer, &so.DiagnosisNotes,
 		&so.OdometerReading, &so.IDTechnician, &so.TechnicianName, &so.CustomerName, &so.CustomerPhone,
-		&so.ModelName, &so.TotalAmount, &so.Discount, &so.FinalAmount, &so.Status,
+		&so.ModelName, &so.TotalAmount, &so.Discount, &so.FinalAmount, &so.Status, &so.EstimatedDeliveryAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -107,13 +107,19 @@ func (r *SQLServerServiceOrderRepository) Create(ctx context.Context, so *servic
 	query := `INSERT INTO SERVICE_ORDER
 	 (SERVICE_TYPE, ID_CUSTOMER_MODEL, DATE_TIME_IN, DATE_TIME_OUT,
 	  CUSTOMER_NOTES, INTERNAL_NOTES, ID_CUSTOMER, DIAGNOSIS_NOTES,
-	  ODOMETER_READING, ID_USER, TOTAL_AMOUNT, DISCOUNT, FINAL_AMOUNT, STATUS)
-	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	  ODOMETER_READING, ID_TECHNICIAN, TOTAL_AMOUNT, DISCOUNT, FINAL_AMOUNT, STATUS, ESTIMATED_DELIVERY_AT)
+	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{
+		derefInt(so.ServiceType), derefInt(so.IDCustomerModel), derefString(so.DateTimeIn), derefString(so.DateTimeOut),
+		derefString(so.CustomerNotes), derefString(so.InternalNotes), derefInt(so.IDCustomer), derefString(so.DiagnosisNotes),
+		derefInt(so.OdometerReading), derefInt(so.IDTechnician), derefFloat(so.TotalAmount), derefFloat(so.Discount), derefFloat(so.FinalAmount),
+		derefInt(so.Status), derefString(so.EstimatedDeliveryAt),
+	}))
 	result, err := r.db.ExecContext(ctx, query,
 		so.ServiceType, so.IDCustomerModel, so.DateTimeIn, so.DateTimeOut,
 		so.CustomerNotes, so.InternalNotes, so.IDCustomer, so.DiagnosisNotes,
 		so.OdometerReading, so.IDTechnician, so.TotalAmount, so.Discount, so.FinalAmount,
-		derefInt(so.Status),
+		derefInt(so.Status), so.EstimatedDeliveryAt,
 	)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))
@@ -132,13 +138,13 @@ func (r *SQLServerServiceOrderRepository) Update(ctx context.Context, so *servic
 	 SET SERVICE_TYPE = ?, ID_CUSTOMER_MODEL = ?, DATE_TIME_IN = ?, DATE_TIME_OUT = ?,
 	     CUSTOMER_NOTES = ?, INTERNAL_NOTES = ?,
 	     ID_CUSTOMER = ?, DIAGNOSIS_NOTES = ?, ODOMETER_READING = ?,
-	     ID_USER = ?, TOTAL_AMOUNT = ?, DISCOUNT = ?, FINAL_AMOUNT = ?, STATUS = ?
+	     ID_TECHNICIAN = ?, TOTAL_AMOUNT = ?, DISCOUNT = ?, FINAL_AMOUNT = ?, STATUS = ?, ESTIMATED_DELIVERY_AT = ?
 	 WHERE ID_ORDER = ?`
 	_, err := r.db.ExecContext(ctx, query,
 		so.ServiceType, so.IDCustomerModel, so.DateTimeIn, so.DateTimeOut,
 		so.CustomerNotes, so.InternalNotes, so.IDCustomer, so.DiagnosisNotes,
 		so.OdometerReading, so.IDTechnician, so.TotalAmount, so.Discount, so.FinalAmount,
-		derefInt(so.Status), so.IDOrder,
+		derefInt(so.Status), so.EstimatedDeliveryAt, so.IDOrder,
 	)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Update failed", slog.Int("id", so.IDOrder), slog.Any("error", err))
@@ -153,4 +159,3 @@ func (r *SQLServerServiceOrderRepository) Delete(ctx context.Context, id int) er
 	}
 	return err
 }
-

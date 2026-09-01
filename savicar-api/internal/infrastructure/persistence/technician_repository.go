@@ -57,7 +57,9 @@ func (r *SQLServerTechnicianRepository) FindByID(ctx context.Context, id int) (*
 }
 
 func (r *SQLServerTechnicianRepository) Create(ctx context.Context, t *technician.Technician) error {
-	result, err := r.db.ExecContext(ctx, "INSERT INTO TECHNICIAN (NAME, SALARY, PERCENT, ID_USER) VALUES (?, ?, ?, ?)", t.Name, t.Salary, t.Percent, t.IDUser)
+	query := "INSERT INTO TECHNICIAN (NAME, SALARY, PERCENT, ID_USER) VALUES (?, ?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{t.Name, t.Salary, t.Percent, t.IDUser}))
+	result, err := r.db.ExecContext(ctx, query, t.Name, t.Salary, t.Percent, t.IDUser)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))
 		return err

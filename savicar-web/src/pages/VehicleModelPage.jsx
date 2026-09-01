@@ -50,10 +50,15 @@ export function VehicleModelForm({ initialData, onSaved, onCancel }) {
     setSaving(true)
     setError(null)
     try {
+      const payload = {
+        ...form,
+        id_make: form.id_make !== '' ? Number(form.id_make) : null,
+        id_fuel: form.id_fuel !== '' ? Number(form.id_fuel) : null,
+      }
       if (isEdit) {
-        await updateVehicleModel(initialData.id_model, form)
+        await updateVehicleModel(initialData.id_model, payload)
       } else {
-        await createVehicleModel(form)
+        await createVehicleModel(payload)
       }
       onSaved()
     } catch (err) {

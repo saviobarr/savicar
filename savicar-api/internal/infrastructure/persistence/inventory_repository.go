@@ -147,6 +147,12 @@ func (r *SQLServerInventoryRepository) Create(ctx context.Context, inv *inventor
 	  SALES_PRICE, COST_PRICE, PRODUCT_SIZE, PRODUCT_ORIGIN, CLASSIFICATION_TYPE,
 	  INITIAL_INVENTORY_QUANTITY, CURRENT_QUANTITY, PRODUCT_DETAILS, IMAGE_PATH)
 	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{
+		inv.Name, inv.Code, inv.Provider, inv.IDMake, inv.MakerCode, inv.ProviderCode,
+		inv.InternalCode, inv.IDUnity, inv.GrossWeight, inv.NetWeight, inv.StorageLocation,
+		inv.Min, inv.Max, inv.GtinEanCode, inv.OriginalNumber, inv.SalesPrice, inv.CostPrice, inv.ProductSize,
+		inv.ProductOrigin, inv.ClassificationType, inv.InitialInventoryQuantity, inv.CurrentQuantity, inv.ProductDetails, inv.ImagePath,
+	}))
 	result, err := r.db.ExecContext(ctx, query,
 		inv.Name, inv.Code, inv.Provider, inv.IDMake, inv.MakerCode, inv.ProviderCode,
 		inv.InternalCode, inv.IDUnity, inv.GrossWeight, inv.NetWeight, inv.StorageLocation,

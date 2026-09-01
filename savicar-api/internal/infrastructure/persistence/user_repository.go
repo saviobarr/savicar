@@ -61,6 +61,7 @@ func (r *SQLServerUserRepository) Create(ctx context.Context, u *user.User) erro
 		return err
 	}
 	query := "INSERT INTO USERS (ID_TENANT, NAME, USER_NAME, PASSWORD, PROFILE) VALUES (?, ?, ?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{u.IDTenant, u.Name, u.UserName, string(hash), u.Profile}))
 	result, err := r.db.ExecContext(ctx, query, u.IDTenant, u.Name, u.UserName, string(hash), u.Profile)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

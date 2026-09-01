@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import SearchSelect from '../components/SearchSelect'
 import {
-  fetchTenantConfig, updateTenantConfig,
+  fetchTenantConfig, updateTenantConfig, uploadTenantLogo,
   fetchAllCountry, fetchAllState, fetchAllCity,
 } from '../api'
 
@@ -11,6 +11,7 @@ export default function DadosEmpresaPage() {
     name: '', exhibition_name: '', tax_id: '',
     address: '', zip_code: '',
     email: '', phone_number: '',
+    api_key_nf: '',
   })
   const [idTenant, setIdTenant]     = useState(null)
   const [countries, setCountries]   = useState([])
@@ -23,6 +24,11 @@ export default function DadosEmpresaPage() {
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState(null)
   const [success, setSuccess]       = useState(false)
+  const [logoPath, setLogoPath]     = useState('')
+  const [logoVersion, setLogoVersion] = useState(0)
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [logoError, setLogoError]   = useState(null)
+  const logoFileRef = useRef(null)
 
   useEffect(() => {
     Promise.all([fetchTenantConfig(), fetchAllCountry(), fetchAllState(), fetchAllCity()])
@@ -45,7 +51,9 @@ export default function DadosEmpresaPage() {
             zip_code:        cfg.zip_code        ?? '',
             email:           cfg.email           ?? '',
             phone_number:    cfg.phone_number    ?? '',
+            api_key_nf:      cfg.api_key_nf      ?? '',
           })
+          setLogoPath(cfg.logo_path ?? '')
 
           // Derive country and state from the saved city
           if (cfg.id_city) {
@@ -111,12 +119,30 @@ export default function DadosEmpresaPage() {
         id_city:         selCity ? Number(selCity) : null,
         email:           form.email.trim()            || null,
         phone_number:    form.phone_number.trim()     || null,
+        api_key_nf:      form.api_key_nf.trim()       || null,
       })
       setSuccess(true)
     } catch (err) {
       setError(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleLogoChange(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setUploadingLogo(true)
+    setLogoError(null)
+    try {
+      const result = await uploadTenantLogo(file)
+      setLogoPath(result.logo_path ?? '')
+      setLogoVersion(v => v + 1)
+    } catch (err) {
+      setLogoError(err.message)
+    } finally {
+      setUploadingLogo(false)
+      e.target.value = ''
     }
   }
 
@@ -159,6 +185,30 @@ export default function DadosEmpresaPage() {
         <div className="form-group">
           <label>Endereço</label>
           <input name="address" value={form.address} onChange={handleChange} />
+        </div>
+
+        <div className="form-group">
+          <label>Logo</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {logoPath && (
+              <img
+                src={`${import.meta.env.VITE_API_URL ?? ''}/tenant-config/logo?v=${logoVersion}`}
+                alt="Logo"
+                style={{ height: 32, maxWidth: 100, objectFit: 'contain', flexShrink: 0 }}
+              />
+            )}
+            <input value={logoPath} readOnly placeholder="Nenhum logo enviado" style={{ flex: 1, color: '#e2e8f0' }} />
+            <button type="button" className="btn-add-contact" onClick={() => logoFileRef.current?.click()} disabled={uploadingLogo} style={{ flexShrink: 0 }}>
+              {uploadingLogo ? 'Enviando...' : logoPath ? 'Alterar Logo' : 'Enviar Logo'}
+            </button>
+            <input ref={logoFileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoChange} />
+          </div>
+          {logoError && <p className="error">{logoError}</p>}
+        </div>
+
+        <div className="form-group">
+          <label>API Key NF</label>
+          <input name="api_key_nf" value={form.api_key_nf} onChange={handleChange} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '0 16px' }}>

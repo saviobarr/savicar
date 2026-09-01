@@ -21,3 +21,7 @@ func (s *Service) Update(ctx context.Context, c *tenantconfig.TenantConfig) erro
 func (s *Service) SetSendWpp(ctx context.Context, value int) error {
 	return s.repo.SetSendWpp(ctx, value)
 }
+
+func (s *Service) SetLogoPath(ctx context.Context, path string) error {
+	return s.repo.SetLogoPath(ctx, path)
+}

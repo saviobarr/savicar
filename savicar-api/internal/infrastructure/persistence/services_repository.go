@@ -71,6 +71,7 @@ func (r *SQLServerServicesRepository) FindByID(ctx context.Context, id int) (*se
 
 func (r *SQLServerServicesRepository) Create(ctx context.Context, s *services.Service) error {
 	query := "INSERT INTO SERVICES (CODE, DESCRICAO, HOURS_QUANTITY, UNIT_VALUE, TOTAL_VALUE, ID_ORDER, ID_TECHNICIAN, STATUS) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{s.Code, s.Description, s.HoursQuantity, s.UnitValue, s.TotalValue, s.IDOrder, derefInt(s.IDTechnician), derefInt(s.Status)}))
 	result, err := r.db.ExecContext(ctx, query, s.Code, s.Description, s.HoursQuantity, s.UnitValue, s.TotalValue, s.IDOrder, derefInt(s.IDTechnician), derefInt(s.Status))
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

@@ -89,6 +89,10 @@ func (r *SQLServerCustomerRepository) Create(ctx context.Context, c *customer.Cu
 	 (IS_LEGAL_PERSON, IS_ACTIVE, LEGAL_NAME, TRADE_NAME, INDIVIDUAL_NAME,
 	  DOB, GENDER, TAX_ID, WEB_SITE, STATE_REGISTRATION, MUNICIPAL_REGISTRATION, IMAGE_PATH)
 	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{
+		c.IsLegalPerson, c.IsActive, c.LegalName, c.TradeName, c.IndividualName,
+		c.DOB, c.Gender, c.TaxID, c.WebSite, c.StateRegistration, c.MunicipalRegistration, c.ImagePath,
+	}))
 	result, err := r.db.ExecContext(ctx, query,
 		c.IsLegalPerson, c.IsActive, c.LegalName, c.TradeName, c.IndividualName,
 		c.DOB, c.Gender, c.TaxID, c.WebSite, c.StateRegistration, c.MunicipalRegistration, c.ImagePath,

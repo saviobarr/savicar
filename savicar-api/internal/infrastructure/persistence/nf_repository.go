@@ -68,6 +68,11 @@ func (r *SQLServerNFRepository) Create(ctx context.Context, n *nf.NF) error {
 	 data_emissao, data_saida, municipio, uf, base_icms, valor_icms, base_icms_st, valor_icms_st,
 	 valor_frete, valor_ipi, valor_total_produtos, valor_total_nota)
 	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{
+		n.Serie, n.Natureza, n.ChaveAcesso, n.Protocolo, n.InscricaoEstadual, n.Cnpj, n.Endereco,
+		n.DataEmissao, n.DataSaida, n.Municipio, n.Uf, n.BaseIcms, n.ValorIcms, n.BaseIcmsSt, n.ValorIcmsSt,
+		n.ValorFrete, n.ValorIpi, n.ValorTotalProdutos, n.ValorTotalNota,
+	}))
 	result, err := r.db.ExecContext(ctx, query,
 		n.Serie, n.Natureza, n.ChaveAcesso, n.Protocolo, n.InscricaoEstadual, n.Cnpj, n.Endereco,
 		n.DataEmissao, n.DataSaida, n.Municipio, n.Uf, n.BaseIcms, n.ValorIcms, n.BaseIcmsSt, n.ValorIcmsSt,
@@ -100,6 +105,16 @@ func (r *SQLServerNFRepository) Update(ctx context.Context, n *nf.NF) error {
 		r.log.ErrorContext(ctx, "Update failed", slog.Int("numero", n.Numero), slog.Any("error", err))
 	}
 	return err
+}
+
+func (r *SQLServerNFRepository) GetMaxNumero(ctx context.Context) (int, error) {
+	var max int
+	err := r.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(numero), 0) FROM nf").Scan(&max)
+	if err != nil {
+		r.log.ErrorContext(ctx, "GetMaxNumero failed", slog.Any("error", err))
+		return 0, err
+	}
+	return max, nil
 }
 
 func (r *SQLServerNFRepository) Delete(ctx context.Context, numero int) error {

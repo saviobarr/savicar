@@ -7,6 +7,7 @@ import { makeFormPages } from '../components/CrudFormPage'
 import { loadFilters, saveFilters } from '../filterStorage'
 import { matchesSearchQuery } from '../searchUtils'
 import { CustomerForm } from './CustomerPage'
+import { InventoryForm } from './InventoryPage'
 import {
   fetchAllServiceOrder,
   fetchTenantConfig,
@@ -409,6 +410,21 @@ export function NewCustomerModal({ onSaved, onCancel }) {
   )
 }
 
+export function NewProductModal({ onSaved, onCancel }) {
+  return createPortal(
+    <div className="form-modal-overlay">
+      <div className="form-modal" onClick={e => e.stopPropagation()}>
+        <div className="form-modal-header">
+          <span>Novo Produto</span>
+          <button className="modal-close" onClick={onCancel}>✕</button>
+        </div>
+        <InventoryForm initialData={null} onSaved={onSaved} onCancel={onCancel} />
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 export function NewCarModal({ idCustomer, onSaved, onCancel }) {
   const [car, setCar] = useState({ id_make: '', id_model: '', plate: '', year_make: '', year_model: '', color: '' })
   const [makes, setMakes] = useState([])
@@ -591,7 +607,7 @@ async function printServiceOrder(data, services, products, payments, inventoryIt
     <h3>Serviços</h3>
     <table class="tbl"><thead><tr><th>Descrição</th><th>Horas</th><th>Valor Unit.</th><th>Total</th></tr></thead><tbody>
     ${services.map(s => `<tr>
-      <td>${s.description ?? ''}</td>
+      <td>${(s.description ?? '') + (Number(s.status) === 6 ? ' - NÃO APROVADO, NÃO SERÁ COBRADO' : '')}</td>
       <td>${s.hours_quantity ?? ''}</td>
       <td>${s.unit_value != null ? fmt(s.unit_value) : ''}</td>
       <td>${s.total_value != null ? fmt(s.total_value) : ''}</td>
@@ -981,6 +997,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
       service_type: initialData?.service_type ?? '',
       id_customer_model: initialData?.id_customer_model ?? '',
       date_time_in: toDatetimeLocal(initialData?.date_time_in) || nowLocalISO(),
+      estimated_delivery_at: toDatetimeLocal(initialData?.estimated_delivery_at),
       id_customer: initialData?.id_customer ?? '',
       id_technician: initialData?.id_technician ?? '',
       customer_notes: initialData?.customer_notes ?? '',
@@ -998,10 +1015,18 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
     const [year, month, day] = datePart.split('-')
     return `${day}/${month}/${year}${timePart ? ' ' + timePart.slice(0, 5) : ''}`
   }
+  function defaultEstimatedDeliveryDisplay() {
+    const raw = toDatetimeLocal(initialData?.estimated_delivery_at)
+    if (!raw) return ''
+    const [datePart, timePart] = raw.replace('T', ' ').split(' ')
+    const [year, month, day] = datePart.split('-')
+    return `${day}/${month}/${year}${timePart ? ' ' + timePart.slice(0, 5) : ''}`
+  }
 
   const [draftDismissed, setDraftDismissed] = useState(false)
   const [form, setForm] = useState(() => draft?.form ?? defaultForm())
   const [dateTimeInDisplay, setDateTimeInDisplay] = useState(() => draft?.dateTimeInDisplay ?? defaultDateTimeInDisplay())
+  const [estimatedDeliveryDisplay, setEstimatedDeliveryDisplay] = useState(() => draft?.estimatedDeliveryDisplay ?? defaultEstimatedDeliveryDisplay())
   const [customers, setCustomers] = useState([])
   const [allModels, setAllModels] = useState([])
   const [technicians, setTechnicians] = useState([])
@@ -1012,7 +1037,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
   const [discountFocused, setDiscountFocused] = useState(false)
 
   // ── Services panel ────────────────────────────────────────────
-  const emptyServiceForm = { code: '', description: '', hours_quantity: '', unit_value: '', total_value: '', id_technician: '', status: '' }
+  const emptyServiceForm = { code: '', description: '', hours_quantity: '', unit_value: '', total_value: '', id_technician: '', status: 0 }
   const [orderServices, setOrderServices] = useState(() => (!isEdit && draft?.orderServices) || [])
   const [editingService, setEditingService] = useState(null)
   const [serviceForm, setServiceForm] = useState(emptyServiceForm)
@@ -1028,6 +1053,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
   const [productForm, setProductForm] = useState(emptyProductForm)
   const [productSaving, setProductSaving] = useState(false)
   const [productError, setProductError] = useState(null)
+  const [newProductOpen, setNewProductOpen] = useState(false)
 
   // ── Payments panel ────────────────────────────────────────────
   const emptyPaymentForm = { id_payment_method: '', due_date: '', payment_date: '', value: '', installments: 1 }
@@ -1062,10 +1088,10 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
   useEffect(() => {
     try {
       sessionStorage.setItem(draftKey, JSON.stringify({
-        form, dateTimeInDisplay, orderServices, orderProducts, orderPayments,
+        form, dateTimeInDisplay, estimatedDeliveryDisplay, orderServices, orderProducts, orderPayments,
       }))
     } catch {}
-  }, [draftKey, form, dateTimeInDisplay, orderServices, orderProducts, orderPayments])
+  }, [draftKey, form, dateTimeInDisplay, estimatedDeliveryDisplay, orderServices, orderProducts, orderPayments])
 
   function clearDraft() {
     try { sessionStorage.removeItem(draftKey) } catch {}
@@ -1081,6 +1107,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
     setDraftDismissed(true)
     setForm(defaultForm())
     setDateTimeInDisplay(defaultDateTimeInDisplay())
+    setEstimatedDeliveryDisplay(defaultEstimatedDeliveryDisplay())
     if (!isEdit) {
       setOrderServices([])
       setOrderProducts([])
@@ -1106,7 +1133,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
         if (myTech) setServiceForm(prev => ({ ...prev, id_technician: myTech.id_technician }))
       }
     }).catch(() => {})
-    fetchAllInventory().then(data => setInventoryItems(data ?? [])).catch(() => {})
+    fetchAllInventory().then(data => setInventoryItems((data ?? []).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'pt-BR', { sensitivity: 'base' })))).catch(() => {})
     fetchAllVehicleMake().then(data => setProductMakes(data ?? [])).catch(() => {})
     fetchAllPaymentMethod().then(data => setPaymentMethods(data ?? [])).catch(() => {})
     if (isEdit) {
@@ -1238,6 +1265,13 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
       setProductError('Selecione o produto e informe a quantidade.')
       return
     }
+    const inv = inventoryItems.find(i => i.id_product === Number(productForm.id_product))
+    if (inv?.current_quantity != null && Number(productForm.quantity) > inv.current_quantity) {
+      const confirmed = window.confirm(
+        `Estoque atual de "${inv.name}": ${inv.current_quantity}. Essa quantidade deixará o estoque negativo. Deseja continuar?`
+      )
+      if (!confirmed) return
+    }
     setProductSaving(true)
     setProductError(null)
     try {
@@ -1361,7 +1395,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
         if (paymentForm.value !== '' && paymentForm.value != null && Number(paymentForm.value) > 0) {
           baseValue = Number(paymentForm.value)
         } else {
-          const totalServices = orderServices.reduce((acc, s) => acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
+          const totalServices = orderServices.reduce((acc, s) => Number(s.status) === 6 ? acc : acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
           const totalProducts = orderProducts.reduce((acc, p) => {
             const inv = inventoryItems.find(i => i.id_product === Number(p.id_product))
             return acc + (inv?.sales_price != null ? Number(inv.sales_price) * Number(p.quantity || 0) : 0)
@@ -1465,6 +1499,30 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
     }
   }
 
+  function handleEstimatedDeliveryChange(e) {
+    const digits = e.target.value.replace(/\D/g, '').slice(0, 12)
+    let display = ''
+    if (digits.length <= 2) {
+      display = digits
+    } else if (digits.length <= 4) {
+      display = digits.slice(0, 2) + '/' + digits.slice(2)
+    } else if (digits.length <= 8) {
+      display = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4)
+    } else if (digits.length <= 10) {
+      display = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4, 8) + ' ' + digits.slice(8)
+    } else {
+      display = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4, 8) + ' ' + digits.slice(8, 10) + ':' + digits.slice(10)
+    }
+    setEstimatedDeliveryDisplay(display)
+    if (digits.length === 12) {
+      const day = digits.slice(0, 2), month = digits.slice(2, 4), year = digits.slice(4, 8)
+      const hh = digits.slice(8, 10), mm = digits.slice(10, 12)
+      setForm(prev => ({ ...prev, estimated_delivery_at: `${year}-${month}-${day}T${hh}:${mm}` }))
+    } else {
+      setForm(prev => ({ ...prev, estimated_delivery_at: '' }))
+    }
+  }
+
   async function saveOrder(overrideStatus) {
     setSaving(true)
     setError(null)
@@ -1529,7 +1587,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
       }
 
       const fmtDatetime = v => v ? v.replace('T', ' ') + (v.length === 16 ? ':00' : '') : null
-      const totalServices = pendingServices.reduce((acc, s) => acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
+      const totalServices = pendingServices.reduce((acc, s) => Number(s.status) === 6 ? acc : acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
       const totalProducts = pendingProducts.reduce((acc, p) => {
         const inv = inventoryItems.find(i => i.id_product === Number(p.id_product))
         return acc + (inv?.sales_price != null ? Number(inv.sales_price) * Number(p.quantity || 0) : 0)
@@ -1545,6 +1603,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
         id_technician: form.id_technician !== '' && form.id_technician != null ? Number(form.id_technician) : null,
         odometer_reading: form.odometer_reading !== '' ? Number(form.odometer_reading) : null,
         date_time_in: fmtDatetime(form.date_time_in),
+        estimated_delivery_at: fmtDatetime(form.estimated_delivery_at),
         total_amount: totalAmount,
         discount: discount,
         final_amount: totalAmount - discount,
@@ -1563,6 +1622,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
             total_value: s.total_value !== '' && s.total_value != null ? Number(s.total_value) : null,
             id_order: created.id_order,
             id_technician: s.id_technician !== '' && s.id_technician != null ? Number(s.id_technician) : null,
+            status: s.status !== '' && s.status != null ? Number(s.status) : null,
           })
         }
         for (const p of pendingProducts) {
@@ -1784,6 +1844,10 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
           <input type="text" name="date_time_in" value={dateTimeInDisplay} onChange={handleDateTimeInChange} placeholder="dd/mm/aaaa hh:mm" maxLength={16} />
         </div>
         <div className="form-group" style={{ flex: 1 }}>
+          <label>Data/Hora Estimada de Entrega</label>
+          <input type="text" name="estimated_delivery_at" value={estimatedDeliveryDisplay} onChange={handleEstimatedDeliveryChange} placeholder="dd/mm/aaaa hh:mm" maxLength={16} />
+        </div>
+        <div className="form-group" style={{ flex: 1 }}>
           <label>Técnico Responsável</label>
           <SelectAutocomplete
             items={technicians.filter(t => t.id_user != null)}
@@ -1807,12 +1871,16 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
         <div className="form-group" style={{ flex: 1 }}>
           <label>Hodômetro (km)</label>
           <input
-            type="number"
+            type="text"
+            inputMode="numeric"
             name="odometer_reading"
-            value={form.odometer_reading}
-            onChange={handleChange}
-            min="0"
-            step="1"
+            value={form.odometer_reading !== '' && form.odometer_reading != null
+              ? Number(form.odometer_reading).toLocaleString('pt-BR')
+              : ''}
+            onChange={e => {
+              const digits = e.target.value.replace(/\D/g, '').slice(0, 9)
+              setForm(prev => ({ ...prev, odometer_reading: digits === '' ? '' : String(Number(digits)) }))
+            }}
             placeholder="Leitura do hodômetro"
           />
         </div>
@@ -2064,20 +2132,42 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
               <div style={{ padding: '1rem' }}>
                 <div className="form-group">
                   <label>Produto</label>
-                  <SelectAutocomplete
-                    items={inventoryItems}
-                    value={productForm.id_product}
-                    onChange={val => setProductForm(prev => ({ ...prev, id_product: val }))}
-                    getId={i => i.id_product}
-                    getLabel={i => {
-                      const maker = i.id_make ? (productMakes.find(m => m.id_make === i.id_make)?.name ?? '') : ''
-                      const parts = [i.name, maker].filter(Boolean).join(' · ')
-                      const qty = i.current_quantity != null ? ` (Estoque: ${i.current_quantity})` : ''
-                      return parts + (i.code ? ` [${i.code}]` : '') + qty
-                    }}
-                    placeholder="Digite o nome ou código..."
-                  />
+                  <div className="autocomplete-with-add">
+                    <SelectAutocomplete
+                      items={inventoryItems}
+                      value={productForm.id_product}
+                      onChange={val => setProductForm(prev => ({ ...prev, id_product: val }))}
+                      getId={i => i.id_product}
+                      getLabel={i => {
+                        const maker = i.id_make ? (productMakes.find(m => m.id_make === i.id_make)?.name ?? '') : ''
+                        const parts = [i.name, maker].filter(Boolean).join(' · ')
+                        const qty = i.current_quantity != null ? ` (Estoque: ${i.current_quantity})` : ''
+                        return parts + (i.code ? ` [${i.code}]` : '') + qty
+                      }}
+                      placeholder="Digite o nome ou código..."
+                      maxSuggestions={30}
+                    />
+                    <button
+                      type="button"
+                      className="btn-add-inline"
+                      onClick={() => setNewProductOpen(true)}
+                      title="Cadastrar novo produto no estoque"
+                    >+</button>
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: '#888', margin: '4px 0 0' }}>
+                    Mostrando os 30 primeiros produtos. Não encontrou o que procura? Comece a digitar para buscar.
+                  </p>
                 </div>
+                {newProductOpen && (
+                  <NewProductModal
+                    onSaved={created => {
+                      setInventoryItems(prev => [...prev, created])
+                      setProductForm(prev => ({ ...prev, id_product: created.id_product }))
+                      setNewProductOpen(false)
+                    }}
+                    onCancel={() => setNewProductOpen(false)}
+                  />
+                )}
                 {productForm.id_product !== '' && (() => {
                   const inv = inventoryItems.find(i => i.id_product === Number(productForm.id_product))
                   return inv?.sales_price != null && !isTecnico ? (
@@ -2252,7 +2342,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
 
       {/* ── Total OS ─────────────────────────────────────────── */}
       {!isTecnico && (() => {
-        const totalServices = orderServices.reduce((acc, s) => acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
+        const totalServices = orderServices.reduce((acc, s) => Number(s.status) === 6 ? acc : acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
         const totalProducts = orderProducts.reduce((acc, p) => {
           const inv = inventoryItems.find(i => i.id_product === Number(p.id_product))
           return acc + (inv?.sales_price != null ? Number(inv.sales_price) * Number(p.quantity || 0) : 0)

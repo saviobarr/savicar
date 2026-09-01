@@ -119,6 +119,9 @@ func (r *SQLServerPaymentRepository) FindByOrderID(ctx context.Context, orderID 
 func (r *SQLServerPaymentRepository) Create(ctx context.Context, p *payment.Payment) error {
 	query := `INSERT INTO PAYMENT (ID_ORDER, ID_PAYMENT_METHOD, INSTALLMENTS_QUANTITY, DUE_DATE, PAYMENT_DATE, VALUE)
 	 VALUES (?, ?, ?, ?, ?, ?)`
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{
+		p.IDOrder, p.IDPaymentMethod, p.InstallmentsQuantity, p.DueDate, p.PaymentDate, p.Value,
+	}))
 	result, err := r.db.ExecContext(ctx, query,
 		p.IDOrder, p.IDPaymentMethod, p.InstallmentsQuantity, p.DueDate, p.PaymentDate, p.Value,
 	)

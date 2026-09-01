@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.myapplication"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -36,6 +36,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     applicationVariants.all {
@@ -58,10 +59,15 @@ dependencies {
     
     implementation(libs.play.services.code.scanner)
     implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.mlkit.text.recognition)
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.gson)
     implementation(libs.androidx.biometric)
     implementation(libs.coil.compose)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

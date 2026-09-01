@@ -59,8 +59,10 @@ func (r *SQLServerCostCategoryRepository) FindByID(ctx context.Context, id int) 
 }
 
 func (r *SQLServerCostCategoryRepository) Create(ctx context.Context, c *costcategory.CostCategory) error {
+	query := "INSERT INTO COST_CATEGORY (NAME, TYPE, DESCRIPTION) VALUES (?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{derefString(c.Name), derefInt(c.Type), derefString(c.Description)}))
 	result, err := r.db.ExecContext(ctx,
-		"INSERT INTO COST_CATEGORY (NAME, TYPE, DESCRIPTION) VALUES (?, ?, ?)",
+		query,
 		derefString(c.Name), derefInt(c.Type), derefString(c.Description),
 	)
 	if err != nil {

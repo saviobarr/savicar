@@ -639,38 +639,47 @@ export function ServiceAppointmentForm({ initialData, onSaved, onCancel }) {
           </table>
         )}
 
-        {editingRes !== null && (
-          <div className="contact-editor">
-            <div className="form-group">
-              <label>Recurso</label>
-              <SelectAutocomplete
-                items={resources}
-                value={resForm.id_resource}
-                onChange={val => setResForm(prev => ({ ...prev, id_resource: val }))}
-                getId={r => r.id_resource}
-                getLabel={r => r.description ?? ''}
-                placeholder="Digite o recurso..."
-              />
+        {editingRes !== null && createPortal(
+          <div className="form-modal-overlay" onClick={() => setEditingRes(null)}>
+            <div className="form-modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+              <div className="form-modal-header">
+                <span>{editingRes.id_service_appointment_resource ? 'Editar Recurso' : 'Novo Recurso'}{initialData?.id_service_appointment ? ` — Agendamento #${initialData.id_service_appointment}` : ''}</span>
+                <button className="modal-close" onClick={() => setEditingRes(null)}>✕</button>
+              </div>
+              <div style={{ padding: '1rem' }}>
+                <div className="form-group">
+                  <label>Recurso</label>
+                  <SelectAutocomplete
+                    items={resources}
+                    value={resForm.id_resource}
+                    onChange={val => setResForm(prev => ({ ...prev, id_resource: val }))}
+                    getId={r => r.id_resource}
+                    getLabel={r => r.description ?? ''}
+                    placeholder="Digite o recurso..."
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Técnico</label>
+                  <SelectAutocomplete
+                    items={technicians}
+                    value={resForm.id_technician}
+                    onChange={val => setResForm(prev => ({ ...prev, id_technician: val }))}
+                    getId={t => t.id_technician}
+                    getLabel={t => t.name ?? ''}
+                    placeholder="Digite o técnico..."
+                  />
+                </div>
+                {resError && <p className="error">{resError}</p>}
+                <div className="form-actions">
+                  <button type="button" className="btn-novo" onClick={handleResSave} disabled={resSaving}>
+                    {resSaving ? 'Salvando...' : 'Salvar recurso'}
+                  </button>
+                  <button type="button" onClick={() => setEditingRes(null)}>Cancelar</button>
+                </div>
+              </div>
             </div>
-            <div className="form-group">
-              <label>Técnico</label>
-              <SelectAutocomplete
-                items={technicians}
-                value={resForm.id_technician}
-                onChange={val => setResForm(prev => ({ ...prev, id_technician: val }))}
-                getId={t => t.id_technician}
-                getLabel={t => t.name ?? ''}
-                placeholder="Digite o técnico..."
-              />
-            </div>
-            {resError && <p className="error">{resError}</p>}
-            <div className="form-actions">
-              <button type="button" className="btn-novo" onClick={handleResSave} disabled={resSaving}>
-                {resSaving ? 'Salvando...' : 'Salvar recurso'}
-              </button>
-              <button type="button" onClick={() => setEditingRes(null)}>Cancelar</button>
-            </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
 
@@ -768,8 +777,9 @@ export default function ServiceAppointmentPage() {
           title="Abrir Ordem de Serviço para este agendamento"
           onClick={() => navigate('/service-orders/new', {
             state: { initialData: {
-              id_customer:       item.id_customer,
-              id_customer_model: item.id_customer_model,
+              id_customer:           item.id_customer,
+              id_customer_model:     item.id_customer_model,
+              estimated_delivery_at: item.end_at,
             }}
           })}
         >

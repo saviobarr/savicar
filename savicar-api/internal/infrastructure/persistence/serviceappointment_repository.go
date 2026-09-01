@@ -89,9 +89,11 @@ func (r *SQLServerServiceAppointmentRepository) FindByID(ctx context.Context, id
 }
 
 func (r *SQLServerServiceAppointmentRepository) Create(ctx context.Context, sa *serviceappointment.ServiceAppointment) error {
+	query := `INSERT INTO SERVICE_APPOINTMENT (ID_CUSTOMER_MODEL, START_AT, END_AT, STATUS, NOTES)
+		 VALUES (?, ?, ?, ?, ?)`
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{sa.IDCustomerModel, sa.StartAt, sa.EndAt, sa.Status, sa.Notes}))
 	result, err := r.db.ExecContext(ctx,
-		`INSERT INTO SERVICE_APPOINTMENT (ID_CUSTOMER_MODEL, START_AT, END_AT, STATUS, NOTES)
-		 VALUES (?, ?, ?, ?, ?)`,
+		query,
 		sa.IDCustomerModel, sa.StartAt, sa.EndAt, sa.Status, sa.Notes,
 	)
 	if err != nil {

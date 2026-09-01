@@ -57,8 +57,10 @@ func (r *SQLServerResourceRepository) FindByID(ctx context.Context, id int) (*re
 }
 
 func (r *SQLServerResourceRepository) Create(ctx context.Context, res *resource.Resource) error {
+	query := "INSERT INTO RESOURCES (DESCRIPTION) VALUES (?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{res.Description}))
 	result, err := r.db.ExecContext(ctx,
-		"INSERT INTO RESOURCES (DESCRIPTION) VALUES (?)", res.Description,
+		query, res.Description,
 	)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

@@ -456,6 +456,7 @@ export function InventoryForm({ initialData, onSaved, onCancel }) {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    e.stopPropagation()
 
     // Na inclusão, verificar se já existe produto com o mesmo código
     if (!isEdit && form.code?.trim()) {
@@ -498,13 +499,14 @@ export function InventoryForm({ initialData, onSaved, onCancel }) {
       }
       if (isEdit) {
         await updateInventory(initialData.id_product, payload)
+        onSaved()
       } else {
         const created = await createInventory(payload)
         for (const file of pendingFiles) {
           await uploadProductImage(created.id_product, file)
         }
+        onSaved(created)
       }
-      onSaved()
     } catch (err) {
       setError(err.message)
     } finally {

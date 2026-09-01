@@ -57,7 +57,9 @@ func (r *SQLServerVehicleMakeRepository) FindByID(ctx context.Context, id int) (
 }
 
 func (r *SQLServerVehicleMakeRepository) Create(ctx context.Context, m *vehiclemake.VehicleMake) error {
-	result, err := r.db.ExecContext(ctx, "INSERT INTO MAKE (NAME) VALUES (?)", m.Name)
+	query := "INSERT INTO MAKE (NAME) VALUES (?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{m.Name}))
+	result, err := r.db.ExecContext(ctx, query, m.Name)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))
 		return err

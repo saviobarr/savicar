@@ -34,12 +34,19 @@ import DadosEmpresaPage from './pages/DadosEmpresaPage'
 import UsersPage, { UserNewPage, UserEditPage } from './pages/UsersPage'
 import AuditPage from './pages/AuditPage'
 import NfPage, { NfNewPage, NfEditPage } from './pages/NfPage'
+import NfsePage from './pages/NfsePage'
 import './App.css'
 
 const NAV_LINKS = [
   { to: '/appointments', label: 'Agendamento', highlight: true },
   { to: '/service-orders', label: 'Ordens de Serviço' },
-  { to: '/nf', label: 'Notas Fiscais' },
+  {
+    label: 'Notas Fiscais',
+    children: [
+      { to: '/nfse', label: 'NFS-e (Serviços)' },
+      { to: '/nf', label: 'NF-e (Vendas)' },
+    ],
+  },
   { to: '/inventory', label: 'Estoque' },
   { to: '/technicians', label: 'Técnicos' },
   {
@@ -283,6 +290,8 @@ function AppShell() {
           <Route path="/nf/new" element={<NfNewPage />} />
           <Route path="/nf/edit" element={<NfEditPage />} />
           <Route path="/nf" element={<NfPage />} />
+
+          <Route path="/nfse" element={<NfsePage />} />
 
           <Route path="/services/new" element={<ServicesNewPage />} />
           <Route path="/services/edit" element={<ServicesEditPage />} />

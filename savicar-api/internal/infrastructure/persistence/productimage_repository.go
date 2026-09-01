@@ -58,6 +58,7 @@ func (r *SQLServerProductImageRepository) FindByID(ctx context.Context, id int) 
 
 func (r *SQLServerProductImageRepository) Create(ctx context.Context, img *productimage.ProductImage) error {
 	query := "INSERT INTO PRODUCT_IMAGES (ID_PRODUCT, IMAGE_PATH) VALUES (?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{img.IDProduct, img.ImagePath}))
 	result, err := r.db.ExecContext(ctx, query, img.IDProduct, img.ImagePath)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

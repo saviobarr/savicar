@@ -73,6 +73,7 @@ func (r *SQLServerCustomerModelRepository) FindByID(ctx context.Context, id int)
 func (r *SQLServerCustomerModelRepository) Create(ctx context.Context, cm *customermodel.CustomerModel) error {
 	query := `INSERT INTO CUSTOMER_MODEL (ID_CUSTOMER, ID_MODEL, PLATE, YEAR_MAKE, YEAR_MODEL, COLOR, VIN)
 	 VALUES (?, ?, ?, ?, ?, ?, ?)`
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{cm.IDCustomer, cm.IDModel, cm.Plate, cm.YearMake, cm.YearModel, cm.Color, cm.VIN}))
 	result, err := r.db.ExecContext(ctx, query, cm.IDCustomer, cm.IDModel, cm.Plate, cm.YearMake, cm.YearModel, cm.Color, cm.VIN)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

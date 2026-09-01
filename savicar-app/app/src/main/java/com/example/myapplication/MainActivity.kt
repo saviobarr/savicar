@@ -1,6 +1,8 @@
 package com.example.myapplication
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas as AndroidCanvas
@@ -8,6 +10,7 @@ import android.graphics.Color as AndroidColor
 import android.graphics.Paint as AndroidPaint
 import android.graphics.Path as AndroidPath
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -18,8 +21,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
@@ -33,6 +43,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,12 +56,16 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
@@ -60,6 +76,9 @@ import com.example.myapplication.ui.theme.SavicarTheme
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,6 +86,7 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -75,10 +95,16 @@ import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Part
 import retrofit2.http.Url
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.SocketTimeoutException
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -89,15 +115,61 @@ private const val PREFS_NAME = "savicar_prefs"
 private const val DEFAULT_SERVER_URL = "http://10.0.2.2:8080"
 private const val BIOMETRIC_KEY_ALIAS = "savicar_biometric_key"
 private const val BIOMETRIC_TRANSFORMATION = "AES/GCM/NoPadding"
+private const val COSMOS_TOKEN = "aAQz9k94OoCAcIIffX-HHg"
+private const val DISCOVERY_PORT = 9999
+private const val DISCOVERY_MSG = "SAVICAR_DISCOVER"
+private const val DISCOVERY_RESPONSE_PREFIX = "SAVICAR_HERE:"
 
 private sealed class Screen {
     data object Home : Screen()
     data object Scanner : Screen()
     data object ServiceOrders : Screen()
     data object NewServiceOrder : Screen()
+    data class ServiceOrderDetail(val order: ServiceOrderSummary) : Screen()
     data class ServiceOrderImages(val order: ServiceOrderSummary) : Screen()
     data object Settings : Screen()
 }
+
+// Abrir a câmera do sistema (para escanear placa ou fotografar a OS) manda a Activity
+// para segundo plano; se o Android matar o processo por pressão de memória nesse meio
+// tempo, sem isso a tela reabriria sempre em Screen.Home, "esquecendo" onde o usuário
+// estava (ex.: no meio da OS #42).
+private fun screenSaveState(screen: Screen): List<Any?> = when (screen) {
+    is Screen.Home -> listOf("Home")
+    is Screen.Scanner -> listOf("Scanner")
+    is Screen.ServiceOrders -> listOf("ServiceOrders")
+    is Screen.NewServiceOrder -> listOf("NewServiceOrder")
+    is Screen.Settings -> listOf("Settings")
+    is Screen.ServiceOrderDetail -> listOf(
+        "ServiceOrderDetail", screen.order.id_order, screen.order.customer_name,
+        screen.order.model_name, screen.order.plate_number, screen.order.status,
+    )
+    is Screen.ServiceOrderImages -> listOf(
+        "ServiceOrderImages", screen.order.id_order, screen.order.customer_name,
+        screen.order.model_name, screen.order.plate_number, screen.order.status,
+    )
+}
+
+private fun screenRestoreState(saved: List<Any?>): Screen {
+    fun order() = ServiceOrderSummary(
+        id_order = saved[1] as Int,
+        customer_name = saved[2] as String?,
+        model_name = saved[3] as String?,
+        plate_number = saved[4] as String?,
+        status = saved[5] as Int?,
+    )
+    return when (saved[0] as String) {
+        "Scanner" -> Screen.Scanner
+        "ServiceOrders" -> Screen.ServiceOrders
+        "NewServiceOrder" -> Screen.NewServiceOrder
+        "Settings" -> Screen.Settings
+        "ServiceOrderDetail" -> Screen.ServiceOrderDetail(order())
+        "ServiceOrderImages" -> Screen.ServiceOrderImages(order())
+        else -> Screen.Home
+    }
+}
+
+private val ScreenSaver = listSaver(save = { screen: Screen -> screenSaveState(screen) }, restore = ::screenRestoreState)
 
 class MainActivity : FragmentActivity() {
 
@@ -117,7 +189,7 @@ class MainActivity : FragmentActivity() {
             var serverUrl by remember { mutableStateOf(prefs.getString("server_url", DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL) }
             var token by remember { mutableStateOf(prefs.getString("token", null)) }
             var hasSavedBiometricLogin by remember { mutableStateOf(hasSavedBiometricCredentials()) }
-            var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+            var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Home) }
 
             SavicarTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -188,7 +260,7 @@ class MainActivity : FragmentActivity() {
                                 serverUrl = serverUrl,
                                 token = token!!,
                                 onBack = { screen = Screen.Home },
-                                onSelectOrder = { order -> screen = Screen.ServiceOrderImages(order) },
+                                onSelectOrder = { order -> screen = Screen.ServiceOrderDetail(order) },
                                 onSelectNewOrder = { screen = Screen.NewServiceOrder },
                             )
                             is Screen.NewServiceOrder -> NewServiceOrderScreen(
@@ -197,11 +269,18 @@ class MainActivity : FragmentActivity() {
                                 onBack = { screen = Screen.ServiceOrders },
                                 onCreated = { order -> screen = Screen.ServiceOrderImages(order) },
                             )
-                            is Screen.ServiceOrderImages -> ServiceOrderImagesScreen(
+                            is Screen.ServiceOrderDetail -> ServiceOrderEditScreen(
                                 serverUrl = serverUrl,
                                 token = token!!,
                                 order = s.order,
                                 onBack = { screen = Screen.ServiceOrders },
+                                onOpenImages = { order -> screen = Screen.ServiceOrderImages(order) },
+                            )
+                            is Screen.ServiceOrderImages -> ServiceOrderImagesScreen(
+                                serverUrl = serverUrl,
+                                token = token!!,
+                                order = s.order,
+                                onBack = { screen = Screen.ServiceOrderDetail(s.order) },
                             )
                             is Screen.Settings -> SettingsScreen(
                                 initialServerUrl = serverUrl,
@@ -230,6 +309,66 @@ class MainActivity : FragmentActivity() {
             }
         } catch (e: Exception) {
             Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    // ── Discovery ──────────────────────────────────────────────────────────
+    // Envia um broadcast UDP na rede local perguntando por um backend Savicar
+    // (ver savicar-api/internal/infrastructure/discovery) e usa o IP/porta de
+    // quem responder primeiro, evitando digitar o endereço do servidor manualmente.
+
+    private suspend fun discoverServer(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            DatagramSocket().use { socket ->
+                socket.broadcast = true
+                socket.soTimeout = 2000
+
+                val message = DISCOVERY_MSG.toByteArray()
+                val targets = mutableListOf(InetAddress.getByName("255.255.255.255"))
+                wifiSubnetBroadcastAddress()?.let { targets.add(it) }
+
+                for (target in targets) {
+                    try {
+                        socket.send(DatagramPacket(message, message.size, target, DISCOVERY_PORT))
+                    } catch (_: Exception) {
+                        // ignora endereço que falhar ao enviar, tenta os demais
+                    }
+                }
+
+                val buf = ByteArray(1024)
+                val packet = DatagramPacket(buf, buf.size)
+                socket.receive(packet)
+
+                val response = String(packet.data, 0, packet.length)
+                val port = response.removePrefix(DISCOVERY_RESPONSE_PREFIX).trim()
+                if (!response.startsWith(DISCOVERY_RESPONSE_PREFIX) || port.toIntOrNull() == null) {
+                    return@withContext Result.failure(Exception("Resposta inválida do servidor"))
+                }
+
+                Result.success("http://${packet.address.hostAddress}:$port")
+            }
+        } catch (e: SocketTimeoutException) {
+            Result.failure(Exception("Nenhum servidor Savicar encontrado na rede"))
+        } catch (e: Exception) {
+            Result.failure(Exception("Erro ao buscar servidor: ${e.message}"))
+        }
+    }
+
+    private fun wifiSubnetBroadcastAddress(): InetAddress? {
+        return try {
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            val dhcp = wifiManager?.dhcpInfo ?: return null
+            if (dhcp.ipAddress == 0 || dhcp.netmask == 0) return null
+            val broadcast = (dhcp.ipAddress and dhcp.netmask) or dhcp.netmask.inv()
+            val bytes = byteArrayOf(
+                (broadcast and 0xff).toByte(),
+                (broadcast shr 8 and 0xff).toByte(),
+                (broadcast shr 16 and 0xff).toByte(),
+                (broadcast shr 24 and 0xff).toByte(),
+            )
+            InetAddress.getByAddress(bytes)
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -362,13 +501,16 @@ class MainActivity : FragmentActivity() {
         var loading by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
         var showPasswordForm by remember { mutableStateOf(!(biometricAvailable && hasSavedBiometricLogin)) }
+        var discovering by remember { mutableStateOf(false) }
+        var discoverError by remember { mutableStateOf<String?>(null) }
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
             Text(text = "Savicar — Leitor de Código de Barras", style = MaterialTheme.typography.headlineSmall)
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -418,6 +560,30 @@ class MainActivity : FragmentActivity() {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            TextButton(
+                onClick = {
+                    discoverError = null
+                    discovering = true
+                    lifecycleScope.launch {
+                        val result = discoverServer()
+                        discovering = false
+                        result
+                            .onSuccess { serverUrl = it }
+                            .onFailure { discoverError = it.message }
+                    }
+                },
+                enabled = !discovering,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (discovering) "Buscando na rede..." else "Buscar servidor na rede")
+            }
+            if (discoverError != null) {
+                Text(
+                    text = discoverError!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Spacer(modifier = Modifier.height(12.dp))
             OutlinedTextField(
                 value = userName,
@@ -471,6 +637,15 @@ class MainActivity : FragmentActivity() {
                     }
                 }
             }
+            }
+            Text(
+                text = "v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp),
+            )
         }
     }
 
@@ -481,33 +656,44 @@ class MainActivity : FragmentActivity() {
         onSelectSettings: () -> Unit,
         onLogout: () -> Unit,
     ) {
-        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(text = "Savicar", style = MaterialTheme.typography.headlineSmall)
-                TextButton(onClick = onLogout) { Text("Sair") }
-            }
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(text = "Savicar", style = MaterialTheme.typography.headlineSmall)
+                    TextButton(onClick = onLogout) { Text("Sair") }
+                }
 
-            Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(32.dp))
 
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                gridItems(
-                    listOf(
-                        Triple("📷", "Ler Código de Barras", onSelectScanner),
-                        Triple("🔧", "Ordens de Serviço", onSelectServiceOrders),
-                        Triple("⚙️", "Configurações", onSelectSettings),
-                    ),
-                ) { (icon, label, onClick) ->
-                    HomeMenuCard(icon = icon, label = label, onClick = onClick)
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    gridItems(
+                        listOf(
+                            Triple("📷", "Ler Código de Barras", onSelectScanner),
+                            Triple("🔧", "Ordens de Serviço", onSelectServiceOrders),
+                            Triple("⚙️", "Configurações", onSelectSettings),
+                        ),
+                    ) { (icon, label, onClick) ->
+                        HomeMenuCard(icon = icon, label = label, onClick = onClick)
+                    }
                 }
             }
+            Text(
+                text = "v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp),
+            )
         }
     }
 
@@ -518,6 +704,8 @@ class MainActivity : FragmentActivity() {
         onSave: (String) -> Unit,
     ) {
         var serverUrl by remember { mutableStateOf(initialServerUrl) }
+        var discovering by remember { mutableStateOf(false) }
+        var discoverError by remember { mutableStateOf<String?>(null) }
 
         Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
             Row(
@@ -544,6 +732,33 @@ class MainActivity : FragmentActivity() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            TextButton(
+                onClick = {
+                    discoverError = null
+                    discovering = true
+                    lifecycleScope.launch {
+                        val result = discoverServer()
+                        discovering = false
+                        result
+                            .onSuccess { serverUrl = it }
+                            .onFailure { discoverError = it.message }
+                    }
+                },
+                enabled = !discovering,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (discovering) "Buscando na rede..." else "Buscar servidor na rede")
+            }
+            if (discoverError != null) {
+                Text(
+                    text = discoverError!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -585,6 +800,7 @@ class MainActivity : FragmentActivity() {
         var product by remember { mutableStateOf<InventoryProduct?>(null) }
         var externalSuggestion by remember { mutableStateOf<ExternalProduct?>(null) }
         var notFoundAnywhere by remember { mutableStateOf(false) }
+        var serverUnreachable by remember { mutableStateOf(false) }
         var loading by remember { mutableStateOf(false) }
         var showRegisterDialog by remember { mutableStateOf(false) }
         var registerError by remember { mutableStateOf<String?>(null) }
@@ -596,6 +812,7 @@ class MainActivity : FragmentActivity() {
             product = null
             externalSuggestion = null
             notFoundAnywhere = false
+            serverUnreachable = false
         }
 
         fun runLookup(code: String) {
@@ -609,8 +826,15 @@ class MainActivity : FragmentActivity() {
                         loading = false
                         product = it
                     }
-                    .onFailure {
-                        val externalResult = withContext(Dispatchers.IO) { lookupExternal(serverUrl, token, code) }
+                    .onFailure { localError ->
+                        // IOException = falha de conexão (servidor fora do ar), diferente de um 404
+                        // "não encontrado" vindo de uma resposta HTTP válida. Nesse caso a busca na
+                        // internet não pode passar pelo backend (ele é o proxy dela), então vai direto.
+                        val backendDown = localError is IOException
+                        serverUnreachable = backendDown
+                        val externalResult = withContext(Dispatchers.IO) {
+                            if (backendDown) lookupExternalDirect(code) else lookupExternal(serverUrl, token, code)
+                        }
                         loading = false
                         externalResult
                             .onSuccess { externalSuggestion = it }
@@ -651,6 +875,14 @@ class MainActivity : FragmentActivity() {
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
+            if (serverUnreachable) {
+                Text(
+                    text = "Servidor Savicar indisponível. Não foi possível consultar o estoque — buscando direto na internet.",
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+            }
+
             product?.let { p ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -671,7 +903,11 @@ class MainActivity : FragmentActivity() {
 
             externalSuggestion?.let { ext ->
                 Text(
-                    text = "Este código não está cadastrado no estoque.",
+                    text = if (serverUnreachable) {
+                        "Servidor Savicar indisponível — não é possível cadastrar o produto agora."
+                    } else {
+                        "Este código não está cadastrado no estoque."
+                    },
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
@@ -683,18 +919,30 @@ class MainActivity : FragmentActivity() {
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-                Button(onClick = { registerError = null; showRegisterDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { registerError = null; showRegisterDialog = true },
+                    enabled = !serverUnreachable,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text("Cadastrar produto")
                 }
             }
 
             if (notFoundAnywhere) {
                 Text(
-                    text = "Produto não encontrado no estoque nem na internet.",
+                    text = if (serverUnreachable) {
+                        "Servidor indisponível e produto não encontrado na internet. Não é possível cadastrar o produto agora."
+                    } else {
+                        "Produto não encontrado no estoque nem na internet."
+                    },
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(bottom = 12.dp),
                 )
-                Button(onClick = { registerError = null; showRegisterDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { registerError = null; showRegisterDialog = true },
+                    enabled = !serverUnreachable,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text("Cadastrar produto manualmente")
                 }
             }
@@ -995,6 +1243,804 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    // ── Service Order Edit: full OS info, editable core fields (status,
+    // técnico, datas, hodômetro, observações, diagnóstico) + WhatsApp send.
+    // Mirrors the web's ServiceOrderDetailFull/ServiceOrderForm
+    // (savicar-web/src/pages/ServiceOrderPage.jsx), but only exposes the
+    // fields listed above for editing on mobile — services/products/payments
+    // stay read-only here and are managed on the web.
+
+    @Composable
+    private fun DetailRow(label: String, value: String?) {
+        if (value.isNullOrBlank()) return
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(150.dp),
+            )
+            Text(text = value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        }
+    }
+
+    private fun pickDateTime(context: Context, initial: String?, onPicked: (String) -> Unit) {
+        val cal = java.util.Calendar.getInstance()
+        if (!initial.isNullOrBlank()) {
+            try {
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                    .parse(initial.replace("T", " ").take(19))
+                    ?.let { cal.time = it }
+            } catch (_: Exception) { /* keep "now" if the stored value can't be parsed */ }
+        }
+        android.app.DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                cal.set(year, month, day)
+                android.app.TimePickerDialog(
+                    context,
+                    { _, hour, minute ->
+                        cal.set(java.util.Calendar.HOUR_OF_DAY, hour)
+                        cal.set(java.util.Calendar.MINUTE, minute)
+                        cal.set(java.util.Calendar.SECOND, 0)
+                        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                        onPicked(fmt.format(cal.time))
+                    },
+                    cal.get(java.util.Calendar.HOUR_OF_DAY),
+                    cal.get(java.util.Calendar.MINUTE),
+                    true,
+                ).show()
+            },
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH),
+            cal.get(java.util.Calendar.DAY_OF_MONTH),
+        ).show()
+    }
+
+    @Composable
+    private fun EditableDateTimeRow(label: String, value: String?, clearable: Boolean, onChange: (String?) -> Unit) {
+        val context = LocalContext.current
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(150.dp),
+            )
+            Text(
+                text = fmtDatetimeBR(value) ?: "—",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { pickDateTime(context, value) { onChange(it) } }) { Text("Alterar") }
+            if (clearable && !value.isNullOrBlank()) {
+                TextButton(onClick = { onChange(null) }) { Text("Limpar") }
+            }
+        }
+    }
+
+    @Composable
+    private fun ServiceOrderEditScreen(
+        serverUrl: String,
+        token: String,
+        order: ServiceOrderSummary,
+        onBack: () -> Unit,
+        onOpenImages: (ServiceOrderSummary) -> Unit,
+    ) {
+        var detail by remember { mutableStateOf<ServiceOrderFull?>(null) }
+        var services by remember { mutableStateOf<List<ServiceItem>>(emptyList()) }
+        var products by remember { mutableStateOf<List<ServiceOrderProductItem>>(emptyList()) }
+        var payments by remember { mutableStateOf<List<PaymentItem>>(emptyList()) }
+        var inventory by remember { mutableStateOf<List<InventoryProduct>>(emptyList()) }
+        var technicians by remember { mutableStateOf<List<TechnicianBrief>>(emptyList()) }
+        var customerModels by remember { mutableStateOf<List<CustomerModelBrief>>(emptyList()) }
+        var vehicleMakes by remember { mutableStateOf<List<VehicleMakeBrief>>(emptyList()) }
+        var vehicleModels by remember { mutableStateOf<List<VehicleModelBrief>>(emptyList()) }
+        var sendWppEnabled by remember { mutableStateOf(false) }
+        var loading by remember { mutableStateOf(true) }
+        var error by remember { mutableStateOf<String?>(null) }
+        var showWppDialog by remember { mutableStateOf(false) }
+
+        // Editable fields, seeded from `detail` once it loads (see the `seeded`
+        // LaunchedEffect below) so later recompositions don't clobber user edits.
+        var seeded by remember { mutableStateOf(false) }
+        var statusEdit by remember { mutableStateOf(0) }
+        var idTechnicianEdit by remember { mutableStateOf<Int?>(null) }
+        var idCustomerModelEdit by remember { mutableStateOf<Int?>(null) }
+        var dateTimeInEdit by remember { mutableStateOf<String?>(null) }
+        var dateTimeOutEdit by remember { mutableStateOf<String?>(null) }
+        var odometerEdit by remember { mutableStateOf("") }
+        var customerNotesEdit by remember { mutableStateOf("") }
+        var internalNotesEdit by remember { mutableStateOf("") }
+        var diagnosisNotesEdit by remember { mutableStateOf("") }
+        var showStatusPicker by remember { mutableStateOf(false) }
+        var showTechnicianPicker by remember { mutableStateOf(false) }
+        var showVehiclePicker by remember { mutableStateOf(false) }
+        var showNewVehicleDialog by remember { mutableStateOf(false) }
+        var newVehicleSaving by remember { mutableStateOf(false) }
+        var newVehicleError by remember { mutableStateOf<String?>(null) }
+        var saving by remember { mutableStateOf(false) }
+        var saveError by remember { mutableStateOf<String?>(null) }
+
+        // Adding/editing service and product lines never shows unit_value/total_value/
+        // sales_price — technicians pick parts+quantity or type a service+hours+técnico only.
+        var showServiceDialog by remember { mutableStateOf(false) }
+        var editingService by remember { mutableStateOf<ServiceItem?>(null) }
+        var serviceLineSaving by remember { mutableStateOf(false) }
+        var serviceLineError by remember { mutableStateOf<String?>(null) }
+        var showProductDialog by remember { mutableStateOf(false) }
+        var editingProduct by remember { mutableStateOf<ServiceOrderProductItem?>(null) }
+        var productLineSaving by remember { mutableStateOf(false) }
+        var productLineError by remember { mutableStateOf<String?>(null) }
+
+        fun refreshServices() {
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) { fetchServicesByOrder(serverUrl, token, order.id_order) }
+                    .onSuccess { services = it }
+            }
+        }
+
+        fun refreshProducts() {
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) { fetchServiceOrderProductsForOrder(serverUrl, token, order.id_order) }
+                    .onSuccess { products = it }
+            }
+        }
+
+        fun saveServiceLine(description: String, hours: Double?, idTechnician: Int?) {
+            serviceLineSaving = true
+            serviceLineError = null
+            val current = editingService
+            lifecycleScope.launch {
+                val result = if (current == null) {
+                    withContext(Dispatchers.IO) {
+                        createService(serverUrl, token, NewServiceRequest(order.id_order, description, hours, idTechnician))
+                    }
+                } else {
+                    val payload = current.copy(description = description, hours_quantity = hours, id_technician = idTechnician)
+                    withContext(Dispatchers.IO) { updateService(serverUrl, token, current.id_service, payload) }
+                }
+                serviceLineSaving = false
+                result
+                    .onSuccess {
+                        showServiceDialog = false
+                        editingService = null
+                        refreshServices()
+                    }
+                    .onFailure { serviceLineError = it.message ?: "Erro ao salvar serviço" }
+            }
+        }
+
+        fun saveProductLine(idProduct: Int, quantity: Double) {
+            productLineSaving = true
+            productLineError = null
+            val current = editingProduct
+            lifecycleScope.launch {
+                val result = if (current == null) {
+                    withContext(Dispatchers.IO) {
+                        createServiceOrderProduct(serverUrl, token, NewServiceOrderProductRequest(order.id_order, idProduct, quantity))
+                    }
+                } else {
+                    val payload = current.copy(id_product = idProduct, quantity = quantity)
+                    withContext(Dispatchers.IO) { updateServiceOrderProduct(serverUrl, token, current.id_service_order_product, payload) }
+                }
+                productLineSaving = false
+                result
+                    .onSuccess {
+                        showProductDialog = false
+                        editingProduct = null
+                        refreshProducts()
+                    }
+                    .onFailure { productLineError = it.message ?: "Erro ao salvar peça" }
+            }
+        }
+
+        LaunchedEffect(order.id_order) {
+            loading = true
+            error = null
+            val detailResult = withContext(Dispatchers.IO) { fetchServiceOrderDetail(serverUrl, token, order.id_order) }
+            val servicesResult = withContext(Dispatchers.IO) { fetchServicesByOrder(serverUrl, token, order.id_order) }
+            val productsResult = withContext(Dispatchers.IO) { fetchServiceOrderProductsForOrder(serverUrl, token, order.id_order) }
+            val paymentsResult = withContext(Dispatchers.IO) { fetchPaymentsForOrder(serverUrl, token, order.id_order) }
+            val inventoryResult = withContext(Dispatchers.IO) { fetchInventoryList(serverUrl, token) }
+            val techResult = withContext(Dispatchers.IO) { fetchTechnicians(serverUrl, token) }
+            val modelsResult = withContext(Dispatchers.IO) { fetchCustomerModels(serverUrl, token) }
+            val makesResult = withContext(Dispatchers.IO) { fetchVehicleMakes(serverUrl, token) }
+            val vehicleModelsResult = withContext(Dispatchers.IO) { fetchVehicleModels(serverUrl, token) }
+            sendWppEnabled = withContext(Dispatchers.IO) { fetchSendWppEnabled(serverUrl, token) }
+            loading = false
+            detailResult.onSuccess { detail = it }.onFailure { error = it.message }
+            services = servicesResult.getOrDefault(emptyList())
+            products = productsResult.getOrDefault(emptyList())
+            payments = paymentsResult.getOrDefault(emptyList())
+            inventory = inventoryResult.getOrDefault(emptyList())
+            technicians = techResult.getOrDefault(emptyList())
+            customerModels = modelsResult.getOrDefault(emptyList())
+            vehicleMakes = makesResult.getOrDefault(emptyList())
+            vehicleModels = vehicleModelsResult.getOrDefault(emptyList())
+        }
+
+        LaunchedEffect(detail) {
+            val d = detail
+            if (d != null && !seeded) {
+                seeded = true
+                statusEdit = d.status ?: 0
+                idTechnicianEdit = d.id_technician
+                idCustomerModelEdit = d.id_customer_model
+                dateTimeInEdit = d.date_time_in
+                dateTimeOutEdit = d.date_time_out
+                odometerEdit = d.odometer_reading?.toString() ?: ""
+                customerNotesEdit = d.customer_notes ?: ""
+                internalNotesEdit = d.internal_notes ?: ""
+                diagnosisNotesEdit = d.diagnosis_notes ?: ""
+            }
+        }
+
+        fun save() {
+            val d = detail ?: return
+            saving = true
+            saveError = null
+            val payload = d.copy(
+                status = statusEdit,
+                id_technician = idTechnicianEdit,
+                id_customer_model = idCustomerModelEdit,
+                date_time_in = dateTimeInEdit,
+                date_time_out = dateTimeOutEdit,
+                odometer_reading = odometerEdit.toIntOrNull(),
+                customer_notes = customerNotesEdit.ifBlank { null },
+                internal_notes = internalNotesEdit.ifBlank { null },
+                diagnosis_notes = diagnosisNotesEdit.ifBlank { null },
+            )
+            lifecycleScope.launch {
+                val result = withContext(Dispatchers.IO) { updateServiceOrder(serverUrl, token, order.id_order, payload) }
+                saving = false
+                result
+                    .onSuccess { onBack() }
+                    .onFailure { saveError = it.message ?: "Erro ao salvar OS" }
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Editar OS #${order.id_order}", style = MaterialTheme.typography.headlineSmall)
+                TextButton(onClick = onBack) { Text("← Voltar") }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+
+            when {
+                loading -> CircularProgressIndicator()
+                error != null -> Text(text = error!!, color = MaterialTheme.colorScheme.error)
+                detail != null -> {
+                    val d = detail!!
+                    DetailRow("Cliente", d.customer_name)
+                    DetailRow("Chassi (VIN)", d.vin)
+
+                    Text(text = "Veículo", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { showVehiclePicker = true }, modifier = Modifier.weight(1f)) {
+                            Text(
+                                customerModels.find { it.id_customer_model == idCustomerModelEdit }?.let { modelLabel(it) }
+                                    ?: "${d.model_name ?: "-"} · ${d.plate_number ?: "-"}",
+                            )
+                        }
+                        OutlinedButton(onClick = { newVehicleError = null; showNewVehicleDialog = true }) {
+                            Text("+ Novo")
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(text = "Status", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(onClick = { showStatusPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(statusLabel(statusEdit))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(text = "Técnico", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(onClick = { showTechnicianPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            technicians.find { it.id_technician == idTechnicianEdit }?.let { technicianLabel(it) }
+                                ?: d.technician_name
+                                ?: "Selecionar técnico",
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    EditableDateTimeRow("Data/Hora Entrada", dateTimeInEdit, clearable = false) { dateTimeInEdit = it }
+                    EditableDateTimeRow("Data/Hora Saída", dateTimeOutEdit, clearable = true) { dateTimeOutEdit = it }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = odometerEdit,
+                        onValueChange = { odometerEdit = it.filter { c -> c.isDigit() } },
+                        label = { Text("Hodômetro (km)") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = customerNotesEdit,
+                        onValueChange = { customerNotesEdit = it },
+                        label = { Text("Obs. do Cliente") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = internalNotesEdit,
+                        onValueChange = { internalNotesEdit = it },
+                        label = { Text("Obs. Internas") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = diagnosisNotesEdit,
+                        onValueChange = { diagnosisNotesEdit = it },
+                        label = { Text("Diagnóstico") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(text = "Serviços", style = MaterialTheme.typography.titleSmall)
+                        TextButton(onClick = { editingService = null; serviceLineError = null; showServiceDialog = true }) {
+                            Text("+ Adicionar")
+                        }
+                    }
+                    if (services.isEmpty()) {
+                        Text(text = "Nenhum serviço adicionado.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    services.forEach { s ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { editingService = s; serviceLineError = null; showServiceDialog = true }
+                                .padding(vertical = 8.dp),
+                        ) {
+                            Text(text = s.description ?: "-", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                text = "${s.hours_quantity ?: 0} h · ${s.technician_name ?: "sem técnico"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(text = "Produtos", style = MaterialTheme.typography.titleSmall)
+                        TextButton(onClick = { editingProduct = null; productLineError = null; showProductDialog = true }) {
+                            Text("+ Adicionar")
+                        }
+                    }
+                    if (products.isEmpty()) {
+                        Text(text = "Nenhuma peça adicionada.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    products.forEach { p ->
+                        val inv = inventory.find { it.id_product == p.id_product }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { editingProduct = p; productLineError = null; showProductDialog = true }
+                                .padding(vertical = 8.dp),
+                        ) {
+                            Text(text = p.product_name ?: inv?.name ?: "Produto #${p.id_product}", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                text = "Quantidade: ${p.quantity ?: 0}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+
+                    if (payments.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(text = "Pagamentos", style = MaterialTheme.typography.titleSmall)
+                        payments.forEach { p ->
+                            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                Text(text = p.payment_method_description ?: "-", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = "Venc: ${fmtDateOnlyBR(p.due_date)} · Pago: ${fmtDateOnlyBR(p.payment_date)} · ${fmtBRL(p.value)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+
+                    val totalAmount = d.total_amount ?: 0.0
+                    val discount = d.discount ?: 0.0
+                    val finalAmount = d.final_amount ?: (totalAmount - discount)
+                    val totalPago = payments.filter { !it.payment_date.isNullOrBlank() }.sumOf { it.value ?: 0.0 }
+                    val totalAberto = finalAmount - totalPago
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    DetailRow("Total OS", fmtBRL(totalAmount))
+                    if (discount != 0.0) DetailRow("Desconto", fmtBRL(discount))
+                    DetailRow("Valor Final", fmtBRL(finalAmount))
+                    DetailRow("Total Pago", fmtBRL(totalPago))
+                    DetailRow("Total Aberto", fmtBRL(totalAberto))
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { onOpenImages(order) }) { Text("Fotos") }
+                        if (sendWppEnabled) {
+                            Button(onClick = { showWppDialog = true }) { Text("WhatsApp") }
+                        }
+                    }
+
+                    if (saveError != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(text = saveError!!, color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = { save() }, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
+                        if (saving) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Salvar Alterações")
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showWppDialog) {
+            WppSendDialog(
+                serverUrl = serverUrl,
+                token = token,
+                orderId = order.id_order,
+                customerName = detail?.customer_name,
+                onDismiss = { showWppDialog = false },
+            )
+        }
+
+        if (showStatusPicker) {
+            PickerDialog(
+                title = "Selecionar status",
+                options = listOf(0, 1, 2, 3, 4, 5),
+                labelOf = { statusLabel(it) },
+                onSelect = {
+                    statusEdit = it
+                    showStatusPicker = false
+                },
+                onDismiss = { showStatusPicker = false },
+            )
+        }
+
+        if (showTechnicianPicker) {
+            PickerDialog(
+                title = "Selecionar técnico",
+                options = technicians,
+                labelOf = { technicianLabel(it) },
+                onSelect = {
+                    idTechnicianEdit = it.id_technician
+                    showTechnicianPicker = false
+                },
+                onDismiss = { showTechnicianPicker = false },
+            )
+        }
+
+        if (showVehiclePicker) {
+            PickerDialog(
+                title = "Selecionar veículo",
+                options = customerModels.filter { it.id_customer == detail?.id_customer },
+                labelOf = { modelLabel(it) },
+                onSelect = {
+                    idCustomerModelEdit = it.id_customer_model
+                    showVehiclePicker = false
+                },
+                onDismiss = { showVehiclePicker = false },
+            )
+        }
+
+        if (showNewVehicleDialog && detail?.id_customer != null) {
+            NewVehicleDialog(
+                idCustomer = detail!!.id_customer!!,
+                makes = vehicleMakes,
+                models = vehicleModels,
+                saving = newVehicleSaving,
+                error = newVehicleError,
+                serverUrl = serverUrl,
+                token = token,
+                onDismiss = { showNewVehicleDialog = false },
+                onConfirm = { request, modelName ->
+                    newVehicleSaving = true
+                    newVehicleError = null
+                    lifecycleScope.launch {
+                        val result = withContext(Dispatchers.IO) { createCustomerModel(serverUrl, token, request) }
+                        newVehicleSaving = false
+                        result
+                            .onSuccess { created ->
+                                val newModel = CustomerModelBrief(
+                                    id_customer_model = created.id_customer_model,
+                                    id_customer = request.id_customer,
+                                    model_name = modelName,
+                                    plate = request.plate,
+                                )
+                                customerModels = customerModels + newModel
+                                idCustomerModelEdit = newModel.id_customer_model
+                                showNewVehicleDialog = false
+                            }
+                            .onFailure { newVehicleError = it.message ?: "Erro ao cadastrar veículo" }
+                    }
+                },
+            )
+        }
+
+        if (showServiceDialog) {
+            ServiceLineDialog(
+                editing = editingService,
+                technicians = technicians,
+                saving = serviceLineSaving,
+                error = serviceLineError,
+                onDismiss = { showServiceDialog = false; editingService = null },
+                onConfirm = { description, hours, idTechnician -> saveServiceLine(description, hours, idTechnician) },
+            )
+        }
+
+        if (showProductDialog) {
+            ProductLineDialog(
+                editing = editingProduct,
+                inventory = inventory,
+                saving = productLineSaving,
+                error = productLineError,
+                onDismiss = { showProductDialog = false; editingProduct = null },
+                onConfirm = { idProduct, quantity -> saveProductLine(idProduct, quantity) },
+            )
+        }
+    }
+
+    @Composable
+    private fun ServiceLineDialog(
+        editing: ServiceItem?,
+        technicians: List<TechnicianBrief>,
+        saving: Boolean,
+        error: String?,
+        onDismiss: () -> Unit,
+        onConfirm: (description: String, hours: Double?, idTechnician: Int?) -> Unit,
+    ) {
+        var description by remember { mutableStateOf(editing?.description ?: "") }
+        var hours by remember { mutableStateOf(editing?.hours_quantity?.toString() ?: "") }
+        var idTechnician by remember { mutableStateOf(editing?.id_technician) }
+        var showTechnicianPicker by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(if (editing == null) "Adicionar Serviço" else "Editar Serviço") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("Serviço") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = hours,
+                        onValueChange = { hours = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
+                        label = { Text("Total de horas") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "Técnico", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(onClick = { showTechnicianPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            technicians.find { it.id_technician == idTechnician }?.let { technicianLabel(it) }
+                                ?: editing?.technician_name
+                                ?: "Selecionar técnico",
+                        )
+                    }
+                    if (error != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = error, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                if (saving) {
+                    CircularProgressIndicator(modifier = Modifier.padding(8.dp))
+                } else {
+                    TextButton(
+                        enabled = description.isNotBlank(),
+                        onClick = { onConfirm(description, hours.replace(",", ".").toDoubleOrNull(), idTechnician) },
+                    ) { Text("Salvar") }
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        )
+
+        if (showTechnicianPicker) {
+            PickerDialog(
+                title = "Selecionar técnico",
+                options = technicians,
+                labelOf = { technicianLabel(it) },
+                onSelect = {
+                    idTechnician = it.id_technician
+                    showTechnicianPicker = false
+                },
+                onDismiss = { showTechnicianPicker = false },
+            )
+        }
+    }
+
+    @Composable
+    private fun ProductLineDialog(
+        editing: ServiceOrderProductItem?,
+        inventory: List<InventoryProduct>,
+        saving: Boolean,
+        error: String?,
+        onDismiss: () -> Unit,
+        onConfirm: (idProduct: Int, quantity: Double) -> Unit,
+    ) {
+        var idProduct by remember { mutableStateOf(editing?.id_product) }
+        var productLabel by remember {
+            mutableStateOf(
+                editing?.let { e -> inventory.find { it.id_product == e.id_product }?.name ?: e.product_name } ?: "",
+            )
+        }
+        var quantity by remember { mutableStateOf(editing?.quantity?.toString() ?: "") }
+        var showProductPicker by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(if (editing == null) "Adicionar Peça" else "Editar Peça") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(text = "Peça", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(onClick = { showProductPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(productLabel.ifBlank { "Selecionar peça" })
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = quantity,
+                        onValueChange = { quantity = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
+                        label = { Text("Quantidade") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (error != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = error, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                if (saving) {
+                    CircularProgressIndicator(modifier = Modifier.padding(8.dp))
+                } else {
+                    TextButton(
+                        enabled = idProduct != null && quantity.replace(",", ".").toDoubleOrNull() != null,
+                        onClick = { onConfirm(idProduct!!, quantity.replace(",", ".").toDouble()) },
+                    ) { Text("Salvar") }
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        )
+
+        if (showProductPicker) {
+            PickerDialog(
+                title = "Selecionar peça",
+                options = inventory,
+                labelOf = { p -> "${p.name ?: "Produto #${p.id_product}"} (${p.current_quantity ?: 0} em estoque)" },
+                onSelect = {
+                    idProduct = it.id_product
+                    productLabel = it.name ?: "Produto #${it.id_product}"
+                    showProductPicker = false
+                },
+                onDismiss = { showProductPicker = false },
+            )
+        }
+    }
+
+    @Composable
+    private fun WppSendDialog(
+        serverUrl: String,
+        token: String,
+        orderId: Int,
+        customerName: String?,
+        onDismiss: () -> Unit,
+    ) {
+        var sending by remember { mutableStateOf(false) }
+        var error by remember { mutableStateOf<String?>(null) }
+        var noPhone by remember { mutableStateOf(false) }
+        var manualPhone by remember { mutableStateOf("") }
+        var sent by remember { mutableStateOf(false) }
+
+        fun send(phoneOverride: String) {
+            sending = true
+            error = null
+            lifecycleScope.launch {
+                val result = withContext(Dispatchers.IO) { sendServiceOrderWhatsApp(serverUrl, token, orderId, phoneOverride) }
+                sending = false
+                when (result) {
+                    is WppSendResult.Success -> sent = true
+                    is WppSendResult.NoPhone -> noPhone = true
+                    is WppSendResult.Error -> error = result.message
+                }
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Enviar OS #$orderId via WhatsApp") },
+            text = {
+                when {
+                    sent -> Text("PDF enviado com sucesso!", color = MaterialTheme.colorScheme.primary)
+                    noPhone -> Column {
+                        Text(
+                            text = "O cliente não possui número de WhatsApp cadastrado. Informe o número abaixo:",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = manualPhone,
+                            onValueChange = { manualPhone = it },
+                            label = { Text("Número (com DDI e DDD)") },
+                            placeholder = { Text("Ex: 5511999999999") },
+                            singleLine = true,
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (error != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(text = error!!, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    else -> Column {
+                        Text(
+                            text = "O PDF da OS #$orderId será enviado para o WhatsApp cadastrado" +
+                                (if (!customerName.isNullOrBlank()) " do cliente $customerName." else "."),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (error != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(text = error!!, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                when {
+                    sent -> TextButton(onClick = onDismiss) { Text("Fechar") }
+                    noPhone -> TextButton(onClick = { send(manualPhone) }, enabled = !sending && manualPhone.isNotBlank()) {
+                        Text(if (sending) "Enviando..." else "Enviar")
+                    }
+                    else -> TextButton(onClick = { send("") }, enabled = !sending) {
+                        Text(if (sending) "Enviando..." else "Confirmar Envio")
+                    }
+                }
+            },
+            dismissButton = {
+                if (!sent) TextButton(onClick = onDismiss) { Text("Cancelar") }
+            },
+        )
+    }
+
     // ── New Service Order: "Abrir OS", mirrors the web ServiceOrderForm's
     // customer/vehicle/technician selection for a quick-open flow on mobile.
 
@@ -1030,6 +2076,8 @@ class MainActivity : FragmentActivity() {
 
         var saving by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
+        var errorDetail by remember { mutableStateOf<String?>(null) }
+        var showErrorDetail by remember { mutableStateOf(false) }
 
         LaunchedEffect(Unit) {
             val customersResult = withContext(Dispatchers.IO) { fetchCustomers(serverUrl, token) }
@@ -1131,7 +2179,15 @@ class MainActivity : FragmentActivity() {
 
                 if (error != null) {
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text(text = error!!, color = MaterialTheme.colorScheme.error)
+                    Text(
+                        text = error!! + if (errorDetail != null) " (toque para detalhes)" else "",
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = if (errorDetail != null) {
+                            Modifier.clickable { showErrorDetail = true }
+                        } else {
+                            Modifier
+                        },
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -1142,6 +2198,7 @@ class MainActivity : FragmentActivity() {
                         val model = selectedModel
                         if (customer == null || model == null) return@Button
                         error = null
+                        errorDetail = null
                         saving = true
                         lifecycleScope.launch {
                             val request = NewServiceOrderRequest(
@@ -1165,7 +2222,10 @@ class MainActivity : FragmentActivity() {
                                         ),
                                     )
                                 }
-                                .onFailure { error = it.message ?: "Erro ao abrir OS" }
+                                .onFailure {
+                                    error = it.message ?: "Erro ao abrir OS"
+                                    errorDetail = (it as? ApiException)?.detail
+                                }
                         }
                     },
                     enabled = selectedCustomer != null && selectedModel != null && !saving,
@@ -1178,6 +2238,17 @@ class MainActivity : FragmentActivity() {
                     }
                 }
             }
+        }
+
+        if (showErrorDetail && errorDetail != null) {
+            AlertDialog(
+                onDismissRequest = { showErrorDetail = false },
+                title = { Text("Detalhe do erro") },
+                text = { Text(errorDetail!!) },
+                confirmButton = {
+                    TextButton(onClick = { showErrorDetail = false }) { Text("Fechar") }
+                },
+            )
         }
 
         if (showCustomerPicker) {
@@ -1255,6 +2326,8 @@ class MainActivity : FragmentActivity() {
                 models = vehicleModels,
                 saving = newVehicleSaving,
                 error = newVehicleError,
+                serverUrl = serverUrl,
+                token = token,
                 onDismiss = { showNewVehicleDialog = false },
                 onConfirm = { request, modelName ->
                     newVehicleSaving = true
@@ -1384,17 +2457,24 @@ class MainActivity : FragmentActivity() {
         models: List<VehicleModelBrief>,
         saving: Boolean,
         error: String?,
+        serverUrl: String,
+        token: String,
         onDismiss: () -> Unit,
         onConfirm: (NewCustomerModelRequest, modelName: String?) -> Unit,
     ) {
+        val context = LocalContext.current
         var selectedMake by remember { mutableStateOf<VehicleMakeBrief?>(null) }
         var selectedModel by remember { mutableStateOf<VehicleModelBrief?>(null) }
         var plate by remember { mutableStateOf("") }
         var yearMake by remember { mutableStateOf("") }
         var yearModel by remember { mutableStateOf("") }
         var color by remember { mutableStateOf("") }
+        var chassis by remember { mutableStateOf("") }
         var showMakePicker by remember { mutableStateOf(false) }
         var showModelPicker by remember { mutableStateOf(false) }
+        var scanning by remember { mutableStateOf(false) }
+        var scanError by remember { mutableStateOf<String?>(null) }
+        var showPlateCamera by remember { mutableStateOf(false) }
 
         val modelsForMake = remember(models, selectedMake) {
             val makeId = selectedMake?.id_make
@@ -1407,11 +2487,99 @@ class MainActivity : FragmentActivity() {
             }
         }
 
+        fun applyLookupResult(result: VehicleLookupResponse) {
+            if (!result.plate.isNullOrBlank()) plate = result.plate
+            if (!result.year_make.isNullOrBlank()) yearMake = result.year_make
+            if (!result.year_model.isNullOrBlank()) yearModel = result.year_model
+            if (!result.color.isNullOrBlank()) color = result.color
+            if (!result.chassis.isNullOrBlank()) chassis = result.chassis
+            val matchedMake = findMatchingMake(makes, result.brand)
+            selectedMake = matchedMake
+            selectedModel = findMatchingModel(models, matchedMake?.id_make, result.model, result.sub_model)
+        }
+
+        fun runPlateLookup(plateValue: String) {
+            lifecycleScope.launch {
+                val result = withContext(Dispatchers.IO) { lookupVehicleByPlate(serverUrl, token, plateValue) }
+                scanning = false
+                result
+                    .onSuccess { applyLookupResult(it) }
+                    .onFailure { scanError = it.message ?: "Erro ao consultar placa" }
+            }
+        }
+
+        fun recognizePlate(uri: Uri) {
+            try {
+                val image = InputImage.fromFilePath(context, uri)
+                val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                recognizer.process(image)
+                    .addOnSuccessListener { visionText ->
+                        val plateFound = extractPlateFromText(visionText.text)
+                        if (plateFound != null) {
+                            runPlateLookup(plateFound)
+                        } else {
+                            scanning = false
+                            scanError = "Não foi possível ler a placa na foto. Tente novamente."
+                        }
+                    }
+                    .addOnFailureListener {
+                        scanning = false
+                        scanError = "Erro ao processar a imagem: ${it.message}"
+                    }
+                    .addOnCompleteListener {
+                        recognizer.close()
+                    }
+            } catch (e: Exception) {
+                scanning = false
+                scanError = "Erro ao processar a imagem: ${e.message}"
+            }
+        }
+
+        fun launchPlateCamera() {
+            scanError = null
+            scanning = true
+            showPlateCamera = true
+        }
+
+        if (showPlateCamera) {
+            CameraCaptureScreen(
+                outputFile = {
+                    val dir = File(context.cacheDir, "plates").apply { mkdirs() }
+                    File(dir, "PLATE_${System.currentTimeMillis()}.jpg")
+                },
+                onCaptured = { uri ->
+                    showPlateCamera = false
+                    recognizePlate(uri)
+                },
+                onCancel = {
+                    showPlateCamera = false
+                    scanning = false
+                },
+            )
+        } else {
         AlertDialog(
             onDismissRequest = onDismiss,
             title = { Text("Novo Veículo do Cliente") },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Button(
+                        onClick = { launchPlateCamera() },
+                        enabled = !scanning,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (scanning) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Consultando...")
+                        } else {
+                            Text("📷 Escanear Placa")
+                        }
+                    }
+                    if (scanError != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = scanError ?: "", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(text = "Marca", style = MaterialTheme.typography.labelMedium)
                     OutlinedButton(onClick = { showMakePicker = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(selectedMake?.name ?: "Selecionar marca")
@@ -1462,6 +2630,14 @@ class MainActivity : FragmentActivity() {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = chassis,
+                        onValueChange = { chassis = it },
+                        label = { Text("Chassi") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                     if (error != null) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(text = error, color = MaterialTheme.colorScheme.error)
@@ -1484,6 +2660,7 @@ class MainActivity : FragmentActivity() {
                                     year_make = yearMake.toIntOrNull(),
                                     year_model = yearModel.toIntOrNull(),
                                     color = color.ifBlank { null },
+                                    vin = chassis.ifBlank { null },
                                 ),
                                 vehicleModelLabel(model),
                             )
@@ -1493,6 +2670,7 @@ class MainActivity : FragmentActivity() {
             },
             dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
         )
+        }
 
         if (showMakePicker) {
             PickerDialog(
@@ -1605,10 +2783,19 @@ class MainActivity : FragmentActivity() {
             if (response.isSuccessful && body != null) {
                 Result.success(body)
             } else {
-                Result.failure(Exception("Erro ao abrir OS (HTTP ${response.code()})"))
+                val detail = response.errorBody()?.string()?.let { extractErrorDetail(it) }
+                Result.failure(ApiException("Erro ao abrir OS (HTTP ${response.code()})", detail))
             }
         } catch (e: Exception) {
             Result.failure(Exception("Não foi possível abrir OS: ${e.message}"))
+        }
+    }
+
+    private fun extractErrorDetail(raw: String): String {
+        return try {
+            JSONObject(raw).optString("error").ifBlank { raw }
+        } catch (e: Exception) {
+            raw
         }
     }
 
@@ -1629,6 +2816,20 @@ class MainActivity : FragmentActivity() {
             if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("Erro ao buscar modelos"))
         } catch (e: Exception) {
             Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    private suspend fun lookupVehicleByPlate(serverUrl: String, token: String, plate: String): Result<VehicleLookupResponse> {
+        return try {
+            val response = api.getVehicleLookup("$serverUrl/vehicle-lookup/$plate", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                Result.failure(Exception("Veículo não encontrado para esta placa (HTTP ${response.code()})"))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível consultar a placa: ${e.message}"))
         }
     }
 
@@ -1672,7 +2873,7 @@ class MainActivity : FragmentActivity() {
         var loading by remember { mutableStateOf(true) }
         var uploading by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
-        var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+        var showCamera by remember { mutableStateOf(false) }
         var pendingAnnotationBytes by remember { mutableStateOf<ByteArray?>(null) }
 
         fun reloadImages() {
@@ -1705,22 +2906,8 @@ class MainActivity : FragmentActivity() {
             }
         }
 
-        val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-            val uri = pendingCameraUri
-            if (success && uri != null) {
-                lifecycleScope.launch {
-                    val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
-                    if (bytes != null) pendingAnnotationBytes = bytes
-                }
-            }
-        }
-
         fun launchCamera() {
-            val dir = File(context.cacheDir, "images").apply { mkdirs() }
-            val file = File(dir, "IMG_${System.currentTimeMillis()}.jpg")
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            pendingCameraUri = uri
-            cameraLauncher.launch(uri)
+            showCamera = true
         }
 
         val imageLoader = remember(serverUrl, token) {
@@ -1733,6 +2920,24 @@ class MainActivity : FragmentActivity() {
                         .build()
                 }
                 .build()
+        }
+
+        if (showCamera) {
+            CameraCaptureScreen(
+                outputFile = {
+                    val dir = File(context.cacheDir, "images").apply { mkdirs() }
+                    File(dir, "IMG_${System.currentTimeMillis()}.jpg")
+                },
+                onCaptured = { uri ->
+                    showCamera = false
+                    lifecycleScope.launch {
+                        val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
+                        if (bytes != null) pendingAnnotationBytes = bytes
+                    }
+                },
+                onCancel = { showCamera = false },
+            )
+            return
         }
 
         val annotationBytes = pendingAnnotationBytes
@@ -1958,6 +3163,42 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    // Usada quando o backend Savicar está fora do ar: replica a mesma cadeia de
+    // busca (Cosmos → UPCItemDB) que normalmente roda no servidor, mas chamando
+    // as APIs externas direto do aparelho, sem depender do backend como proxy.
+    private suspend fun lookupExternalDirect(code: String): Result<ExternalProduct> {
+        lookupCosmosDirect(code).getOrNull()?.let { return Result.success(it) }
+        return lookupUpcItemDbDirect(code)
+    }
+
+    private suspend fun lookupCosmosDirect(code: String): Result<ExternalProduct> {
+        return try {
+            val response = api.getCosmosLookup("https://api.cosmos.bluesoft.com.br/gtins/$code", COSMOS_TOKEN)
+            val body = response.body()
+            if (response.isSuccessful && !body?.description.isNullOrBlank()) {
+                Result.success(ExternalProduct(name = body!!.description, brand = body.brand?.name))
+            } else {
+                Result.failure(Exception("not found"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun lookupUpcItemDbDirect(code: String): Result<ExternalProduct> {
+        return try {
+            val response = api.getUpcItemDbLookup("https://api.upcitemdb.com/prod/trial/lookup?upc=$code")
+            val item = response.body()?.items?.firstOrNull()
+            if (response.isSuccessful && item != null) {
+                Result.success(ExternalProduct(name = item.title, brand = item.brand))
+            } else {
+                Result.failure(Exception("not found"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private suspend fun registerProduct(serverUrl: String, token: String, request: NewProductRequest): Result<InventoryProduct> {
         return try {
             val response = api.createProduct("$serverUrl/inventory", "Bearer $token", request)
@@ -2035,6 +3276,182 @@ class MainActivity : FragmentActivity() {
             Result.failure(Exception("Não foi possível enviar: ${e.message}"))
         }
     }
+
+    private suspend fun fetchServiceOrderDetail(serverUrl: String, token: String, id: Int): Result<ServiceOrderFull> {
+        return try {
+            val response = api.getServiceOrderById("$serverUrl/service-orders/$id", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("Erro ao buscar OS"))
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    // The backend PUT overwrites every column (including total/discount/final amounts
+    // computed elsewhere), so callers must send a full ServiceOrderFull seeded from a
+    // prior GET with only the user-edited fields changed — never a partial object.
+    private suspend fun updateServiceOrder(serverUrl: String, token: String, id: Int, body: ServiceOrderFull): Result<ServiceOrderFull> {
+        return try {
+            val response = api.updateServiceOrder("$serverUrl/service-orders/$id", "Bearer $token", body)
+            val respBody = response.body()
+            if (response.isSuccessful && respBody != null) {
+                Result.success(respBody)
+            } else {
+                val detail = response.errorBody()?.string()?.let { extractErrorDetail(it) }
+                Result.failure(ApiException("Erro ao salvar OS (HTTP ${response.code()})", detail))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível salvar: ${e.message}"))
+        }
+    }
+
+    private suspend fun fetchServicesByOrder(serverUrl: String, token: String, orderId: Int): Result<List<ServiceItem>> {
+        return try {
+            val response = api.getAllServices("$serverUrl/services", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                Result.success(body.filter { it.id_order == orderId })
+            } else {
+                Result.failure(Exception("Erro ao buscar serviços"))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    private suspend fun fetchServiceOrderProductsForOrder(serverUrl: String, token: String, orderId: Int): Result<List<ServiceOrderProductItem>> {
+        return try {
+            val response = api.getServiceOrderProductsByOrder("$serverUrl/service-order-products/order/$orderId", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("Erro ao buscar produtos"))
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    private suspend fun createService(serverUrl: String, token: String, request: NewServiceRequest): Result<ServiceItem> {
+        return try {
+            val response = api.createService("$serverUrl/services", "Bearer $token", request)
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                val detail = response.errorBody()?.string()?.let { extractErrorDetail(it) }
+                Result.failure(ApiException("Erro ao adicionar serviço (HTTP ${response.code()})", detail))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível adicionar serviço: ${e.message}"))
+        }
+    }
+
+    // The backend PUT overwrites every column, including unit_value/total_value that this
+    // app never shows — callers must pass a full ServiceItem seeded from a prior GET.
+    private suspend fun updateService(serverUrl: String, token: String, id: Int, body: ServiceItem): Result<ServiceItem> {
+        return try {
+            val response = api.updateService("$serverUrl/services/$id", "Bearer $token", body)
+            val respBody = response.body()
+            if (response.isSuccessful && respBody != null) {
+                Result.success(respBody)
+            } else {
+                val detail = response.errorBody()?.string()?.let { extractErrorDetail(it) }
+                Result.failure(ApiException("Erro ao salvar serviço (HTTP ${response.code()})", detail))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível salvar serviço: ${e.message}"))
+        }
+    }
+
+    private suspend fun createServiceOrderProduct(serverUrl: String, token: String, request: NewServiceOrderProductRequest): Result<ServiceOrderProductItem> {
+        return try {
+            val response = api.createServiceOrderProduct("$serverUrl/service-order-products", "Bearer $token", request)
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                val detail = response.errorBody()?.string()?.let { extractErrorDetail(it) }
+                Result.failure(ApiException("Erro ao adicionar peça (HTTP ${response.code()})", detail))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível adicionar peça: ${e.message}"))
+        }
+    }
+
+    private suspend fun updateServiceOrderProduct(serverUrl: String, token: String, id: Int, body: ServiceOrderProductItem): Result<ServiceOrderProductItem> {
+        return try {
+            val response = api.updateServiceOrderProduct("$serverUrl/service-order-products/$id", "Bearer $token", body)
+            val respBody = response.body()
+            if (response.isSuccessful && respBody != null) {
+                Result.success(respBody)
+            } else {
+                val detail = response.errorBody()?.string()?.let { extractErrorDetail(it) }
+                Result.failure(ApiException("Erro ao salvar peça (HTTP ${response.code()})", detail))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível salvar peça: ${e.message}"))
+        }
+    }
+
+    private suspend fun fetchPaymentsForOrder(serverUrl: String, token: String, orderId: Int): Result<List<PaymentItem>> {
+        return try {
+            val response = api.getPaymentsByOrder("$serverUrl/payments/order/$orderId", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("Erro ao buscar pagamentos"))
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    private suspend fun fetchInventoryList(serverUrl: String, token: String): Result<List<InventoryProduct>> {
+        return try {
+            val response = api.getAllInventory("$serverUrl/inventory", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("Erro ao buscar estoque"))
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+        }
+    }
+
+    private suspend fun fetchSendWppEnabled(serverUrl: String, token: String): Boolean {
+        return try {
+            val response = api.getTenantConfig("$serverUrl/tenant-config", "Bearer $token")
+            response.body()?.send_wpp == 1
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private suspend fun sendServiceOrderWhatsApp(serverUrl: String, token: String, orderId: Int, phoneOverride: String): WppSendResult {
+        return try {
+            val response = api.sendServiceOrderWhatsApp(
+                "$serverUrl/whatsapp/send-order",
+                "Bearer $token",
+                WppSendRequest(orderId, phoneOverride),
+            )
+            if (response.isSuccessful) {
+                WppSendResult.Success(response.body()?.phone ?: "")
+            } else {
+                val raw = response.errorBody()?.string()
+                val json = raw?.let { runCatching { JSONObject(it) }.getOrNull() }
+                val code = json?.optString("error")
+                if (code == "no_phone") {
+                    WppSendResult.NoPhone
+                } else {
+                    val message = json?.optString("message")?.takeIf { it.isNotBlank() }
+                        ?: code?.takeIf { !it.isNullOrBlank() }
+                        ?: "Erro ao enviar (HTTP ${response.code()})"
+                    WppSendResult.Error(message)
+                }
+            }
+        } catch (e: Exception) {
+            WppSendResult.Error("Não foi possível enviar: ${e.message}")
+        }
+    }
+}
+
+private sealed class WppSendResult {
+    data class Success(val phone: String) : WppSendResult()
+    data object NoPhone : WppSendResult()
+    data class Error(val message: String) : WppSendResult()
 }
 
 private fun statusLabel(status: Int?): String = when (status) {
@@ -2059,10 +3476,188 @@ private fun technicianLabel(t: TechnicianBrief): String =
 private fun vehicleModelLabel(m: VehicleModelBrief): String =
     (m.name ?: "-") + (if (!m.version.isNullOrBlank()) " ${m.version}" else "")
 
+// Captura a foto dentro do próprio app via CameraX, em vez de delegar para o app de câmera
+// do sistema. Duas vantagens sobre a intent implícita ACTION_IMAGE_CAPTURE: a lente traseira
+// fica garantida via CameraSelector.DEFAULT_BACK_CAMERA (a maioria dos apps de câmera atuais
+// ignora os extras que pediam isso na intent implícita), e a Activity nunca sai do primeiro
+// plano — então o Android não mata mais o processo nesse fluxo, o que antes apagava o estado
+// da tela (ex.: os campos já preenchidos de uma nova OS) quando o app era recriado do zero.
+@Composable
+private fun CameraCaptureScreen(
+    outputFile: () -> File,
+    onCaptured: (Uri) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var hasCameraPermission by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        hasCameraPermission = granted
+    }
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    Dialog(onDismissRequest = onCancel, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            if (!hasCameraPermission) {
+                Column(
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        "É preciso permitir o acesso à câmera para tirar a foto.",
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = onCancel) { Text("Cancelar") }
+                }
+            } else {
+                var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        val previewView = PreviewView(ctx)
+                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                        cameraProviderFuture.addListener({
+                            val cameraProvider = cameraProviderFuture.get()
+                            val preview = Preview.Builder().build().also {
+                                it.setSurfaceProvider(previewView.surfaceProvider)
+                            }
+                            val capture = ImageCapture.Builder().build()
+                            imageCapture = capture
+                            try {
+                                cameraProvider.unbindAll()
+                                cameraProvider.bindToLifecycle(
+                                    lifecycleOwner,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    preview,
+                                    capture,
+                                )
+                            } catch (_: Exception) {
+                                // Câmera indisponível (em uso por outro app, etc.) — o botão de
+                                // captura simplesmente não fará nada até uma nova composição.
+                            }
+                        }, ContextCompat.getMainExecutor(ctx))
+                        previewView
+                    },
+                )
+
+                Button(
+                    onClick = {
+                        val capture = imageCapture ?: return@Button
+                        val file = outputFile()
+                        val options = ImageCapture.OutputFileOptions.Builder(file).build()
+                        capture.takePicture(
+                            options,
+                            ContextCompat.getMainExecutor(context),
+                            object : ImageCapture.OnImageSavedCallback {
+                                override fun onImageSaved(outputResults: ImageCapture.OutputFileResults) {
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                                    onCaptured(uri)
+                                }
+
+                                override fun onError(exception: ImageCaptureException) {
+                                    onCancel()
+                                }
+                            },
+                        )
+                    },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(32.dp),
+                ) { Text("📷 Capturar") }
+
+                TextButton(
+                    onClick = onCancel,
+                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+                ) { Text("Cancelar", color = Color.White) }
+            }
+        }
+    }
+}
+
+private val PLATE_REGEX = Regex("^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$")
+
+// Extracts a Brazilian plate (old ABC1234 or Mercosul ABC1D23 format) from
+// OCR text — tries each line first, then a sliding window over the whole
+// text, since the camera photo may also capture other text on the vehicle.
+private fun extractPlateFromText(text: String): String? {
+    val upper = text.uppercase()
+    for (line in upper.lines()) {
+        val cleaned = line.replace(Regex("[^A-Z0-9]"), "")
+        if (cleaned.length == 7 && PLATE_REGEX.matches(cleaned)) return cleaned
+    }
+    val wholeCleaned = upper.replace(Regex("[^A-Z0-9]"), "")
+    for (i in 0..wholeCleaned.length - 7) {
+        val window = wholeCleaned.substring(i, i + 7)
+        if (PLATE_REGEX.matches(window)) return window
+    }
+    return null
+}
+
+private fun normalizeForMatch(s: String): String =
+    java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+        .uppercase()
+        .trim()
+
+// Best-effort match against the already-loaded make/model catalog. Returns
+// null (leave the field blank for manual selection) when nothing lines up —
+// the app has no way to create new makes/models on the fly.
+private fun findMatchingMake(makes: List<VehicleMakeBrief>, brand: String?): VehicleMakeBrief? {
+    val target = normalizeForMatch(brand ?: "")
+    if (target.isBlank()) return null
+    return makes.firstOrNull { normalizeForMatch(it.name ?: "") == target }
+        ?: makes.firstOrNull { m ->
+            val name = normalizeForMatch(m.name ?: "")
+            name.isNotBlank() && (name.contains(target) || target.contains(name))
+        }
+}
+
+private fun findMatchingModel(
+    models: List<VehicleModelBrief>,
+    makeId: Int?,
+    modelText: String?,
+    subModel: String?,
+): VehicleModelBrief? {
+    val candidates = if (makeId != null) models.filter { it.id_make == makeId } else models
+    if (candidates.isEmpty()) return null
+    val targetFull = normalizeForMatch(modelText ?: "")
+    val targetSub = normalizeForMatch(subModel ?: "")
+    candidates.firstOrNull { normalizeForMatch(vehicleModelLabel(it)) == targetFull }?.let { return it }
+    if (targetSub.isNotBlank()) {
+        candidates.firstOrNull { normalizeForMatch(it.name ?: "") == targetSub }?.let { return it }
+    }
+    return candidates.firstOrNull { c ->
+        val name = normalizeForMatch(c.name ?: "")
+        name.isNotBlank() && targetFull.contains(name)
+    }
+}
+
 private fun nowSqlDateTime(): String {
     val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
     return fmt.format(java.util.Date())
 }
+
+private fun fmtDatetimeBR(value: String?): String? {
+    if (value.isNullOrBlank()) return null
+    val cleaned = value.replace("T", " ")
+    if (cleaned.length < 16) return value
+    val bits = cleaned.substring(0, 10).split("-")
+    if (bits.size != 3) return value
+    return "${bits[2]}/${bits[1]}/${bits[0]} ${cleaned.substring(11, 16)}"
+}
+
+private fun fmtDateOnlyBR(value: String?): String {
+    if (value.isNullOrBlank()) return "-"
+    val bits = value.take(10).split("-")
+    return if (bits.size == 3) "${bits[2]}/${bits[1]}/${bits[0]}" else "-"
+}
+
+private fun fmtBRL(value: Double?): String =
+    java.text.NumberFormat.getCurrencyInstance(java.util.Locale("pt", "BR")).format(value ?: 0.0)
 
 // Cap the longest side so huge camera photos don't blow up memory while
 // annotating/uploading — plenty of detail remains for marking scratches.
@@ -2125,6 +3720,12 @@ data class InventoryProduct(
 
 data class ExternalProduct(val name: String?, val brand: String?)
 
+data class CosmosLookupResponse(val description: String?, val brand: CosmosBrand?)
+data class CosmosBrand(val name: String?)
+
+data class UpcItemDbLookupResponse(val items: List<UpcItemDbItem>?)
+data class UpcItemDbItem(val title: String?, val brand: String?)
+
 data class AdjustQuantityRequest(val delta: Double)
 
 data class NewProductRequest(
@@ -2149,6 +3750,91 @@ data class ServiceOrderImageMeta(
     val id_image: Int,
     val id_order: Int?,
     val image_path: String?,
+)
+
+data class ServiceOrderFull(
+    val id_order: Int,
+    val service_type: Int?,
+    val id_customer_model: Int?,
+    val date_time_in: String?,
+    val date_time_out: String?,
+    val plate_number: String?,
+    val vin: String?,
+    val customer_notes: String?,
+    val internal_notes: String?,
+    val id_customer: Int?,
+    val diagnosis_notes: String?,
+    val odometer_reading: Int?,
+    val id_technician: Int?,
+    val technician_name: String?,
+    val customer_name: String?,
+    val customer_phone: String?,
+    val model_name: String?,
+    val total_amount: Double?,
+    val discount: Double?,
+    val final_amount: Double?,
+    val status: Int?,
+)
+
+data class ServiceItem(
+    val id_service: Int,
+    val code: String?,
+    val description: String?,
+    val hours_quantity: Double?,
+    val unit_value: Double?,
+    val total_value: Double?,
+    val id_order: Int?,
+    val id_technician: Int?,
+    val technician_name: String?,
+    val status: Int?,
+)
+
+data class ServiceOrderProductItem(
+    val id_service_order_product: Int,
+    val id_order: Int?,
+    val id_product: Int?,
+    val quantity: Double?,
+    val product_name: String?,
+)
+
+// Mobile only ever sets description/hours/technician — never unit_value or
+// total_value, which stay hidden from this app (see ServiceOrderEditScreen).
+data class NewServiceRequest(
+    val id_order: Int,
+    val description: String,
+    val hours_quantity: Double?,
+    val id_technician: Int?,
+)
+
+data class NewServiceOrderProductRequest(
+    val id_order: Int,
+    val id_product: Int,
+    val quantity: Double,
+)
+
+data class PaymentItem(
+    val id_payment: Int,
+    val id_order: Int?,
+    val id_payment_method: Int?,
+    val payment_method_description: String?,
+    val installments_quantity: String?,
+    val due_date: String?,
+    val payment_date: String?,
+    val value: Double?,
+)
+
+data class TenantConfigResponse(
+    val send_wpp: Int?,
+)
+
+data class WppSendRequest(
+    val order_id: Int,
+    val phone_override: String,
+)
+
+data class WppSendResponse(
+    val sent: Boolean?,
+    val phone: String?,
 )
 
 data class CustomerBrief(
@@ -2181,6 +3867,8 @@ data class NewServiceOrderRequest(
 
 data class ServiceOrderCreateResponse(val id_order: Int)
 
+class ApiException(message: String, val detail: String?) : Exception(message)
+
 data class VehicleMakeBrief(
     val id_make: Int,
     val name: String?,
@@ -2211,6 +3899,19 @@ data class NewCustomerModelRequest(
     val year_make: Int?,
     val year_model: Int?,
     val color: String?,
+    val vin: String?,
+)
+
+data class VehicleLookupResponse(
+    val plate: String?,
+    val brand: String?,
+    val model: String?,
+    val sub_model: String?,
+    val version: String?,
+    val year_make: String?,
+    val year_model: String?,
+    val color: String?,
+    val chassis: String?,
 )
 
 data class CustomerModelCreateResponse(val id_customer_model: Int)
@@ -2224,6 +3925,12 @@ interface SavicarApi {
 
     @GET
     suspend fun getExternalLookup(@Url url: String, @Header("Authorization") auth: String): Response<ExternalProduct>
+
+    @GET
+    suspend fun getCosmosLookup(@Url url: String, @Header("X-Cosmos-Token") token: String): Response<CosmosLookupResponse>
+
+    @GET
+    suspend fun getUpcItemDbLookup(@Url url: String): Response<UpcItemDbLookupResponse>
 
     @POST
     suspend fun createProduct(@Url url: String, @Header("Authorization") auth: String, @Body body: NewProductRequest): Response<InventoryProduct>
@@ -2260,6 +3967,9 @@ interface SavicarApi {
     @GET
     suspend fun getVehicleModels(@Url url: String, @Header("Authorization") auth: String): Response<List<VehicleModelBrief>>
 
+    @GET
+    suspend fun getVehicleLookup(@Url url: String, @Header("Authorization") auth: String): Response<VehicleLookupResponse>
+
     @POST
     suspend fun createCustomer(
         @Url url: String,
@@ -2285,4 +3995,64 @@ interface SavicarApi {
         @Part("id_order") idOrder: okhttp3.RequestBody,
         @Part image: MultipartBody.Part,
     ): Response<ServiceOrderImageMeta>
+
+    @GET
+    suspend fun getServiceOrderById(@Url url: String, @Header("Authorization") auth: String): Response<ServiceOrderFull>
+
+    @PUT
+    suspend fun updateServiceOrder(
+        @Url url: String,
+        @Header("Authorization") auth: String,
+        @Body body: ServiceOrderFull,
+    ): Response<ServiceOrderFull>
+
+    @GET
+    suspend fun getAllServices(@Url url: String, @Header("Authorization") auth: String): Response<List<ServiceItem>>
+
+    @POST
+    suspend fun createService(
+        @Url url: String,
+        @Header("Authorization") auth: String,
+        @Body body: NewServiceRequest,
+    ): Response<ServiceItem>
+
+    @PUT
+    suspend fun updateService(
+        @Url url: String,
+        @Header("Authorization") auth: String,
+        @Body body: ServiceItem,
+    ): Response<ServiceItem>
+
+    @GET
+    suspend fun getServiceOrderProductsByOrder(@Url url: String, @Header("Authorization") auth: String): Response<List<ServiceOrderProductItem>>
+
+    @POST
+    suspend fun createServiceOrderProduct(
+        @Url url: String,
+        @Header("Authorization") auth: String,
+        @Body body: NewServiceOrderProductRequest,
+    ): Response<ServiceOrderProductItem>
+
+    @PUT
+    suspend fun updateServiceOrderProduct(
+        @Url url: String,
+        @Header("Authorization") auth: String,
+        @Body body: ServiceOrderProductItem,
+    ): Response<ServiceOrderProductItem>
+
+    @GET
+    suspend fun getPaymentsByOrder(@Url url: String, @Header("Authorization") auth: String): Response<List<PaymentItem>>
+
+    @GET
+    suspend fun getAllInventory(@Url url: String, @Header("Authorization") auth: String): Response<List<InventoryProduct>>
+
+    @GET
+    suspend fun getTenantConfig(@Url url: String, @Header("Authorization") auth: String): Response<TenantConfigResponse>
+
+    @POST
+    suspend fun sendServiceOrderWhatsApp(
+        @Url url: String,
+        @Header("Authorization") auth: String,
+        @Body body: WppSendRequest,
+    ): Response<WppSendResponse>
 }

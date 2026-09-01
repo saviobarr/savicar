@@ -82,6 +82,7 @@ func (r *SQLServerProdutosNfRepository) FindByNfID(ctx context.Context, nfID int
 
 func (r *SQLServerProdutosNfRepository) Create(ctx context.Context, p *produtosnf.ProdutoNf) error {
 	query := "INSERT INTO produtos_nf (numero, descricao, unidade, quantidade, vl_unitario, vl_total, bc_icms, vl_icms, aliquota_icms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{p.Numero, p.Descricao, p.Unidade, p.Quantidade, p.VlUnitario, p.VlTotal, p.BcIcms, p.VlIcms, p.AliquotaIcms}))
 	result, err := r.db.ExecContext(ctx, query, p.Numero, p.Descricao, p.Unidade, p.Quantidade, p.VlUnitario, p.VlTotal, p.BcIcms, p.VlIcms, p.AliquotaIcms)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

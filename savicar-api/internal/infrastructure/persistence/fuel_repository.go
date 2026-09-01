@@ -57,7 +57,9 @@ func (r *SQLServerFuelRepository) FindByID(ctx context.Context, id int) (*fuel.F
 }
 
 func (r *SQLServerFuelRepository) Create(ctx context.Context, f *fuel.Fuel) error {
-	result, err := r.db.ExecContext(ctx, "INSERT INTO FUEL (NAME) VALUES (?)", f.Name)
+	query := "INSERT INTO FUEL (NAME) VALUES (?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{f.Name}))
+	result, err := r.db.ExecContext(ctx, query, f.Name)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))
 		return err

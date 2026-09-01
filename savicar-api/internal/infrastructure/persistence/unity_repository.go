@@ -58,6 +58,7 @@ func (r *SQLServerUnityRepository) FindByID(ctx context.Context, id int) (*unity
 
 func (r *SQLServerUnityRepository) Create(ctx context.Context, u *unity.Unity) error {
 	query := "INSERT INTO UNIT (DESCRIPTION) VALUES (?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{u.Description}))
 	result, err := r.db.ExecContext(ctx, query, u.Description)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

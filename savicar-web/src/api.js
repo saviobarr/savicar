@@ -609,6 +609,47 @@ export async function updateTenantConfig(data) {
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
+export async function uploadTenantLogo(file) {
+  const fd = new FormData()
+  fd.append('logo', file)
+  const res = await apiFetch(`${BASE}/tenant-config/logo`, { method: 'POST', body: fd })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+// â”€â”€ NFS-e â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export async function emitirNfse(payload) {
+  const res = await apiFetch(`${BASE}/nfse/emitir`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+  const data = await res.json().catch(() => null)
+  if (!res.ok) {
+    const message = (data && (data.error || data.message)) || `Erro ao emitir NFS-e (HTTP ${res.status})`
+    const err = new Error(message)
+    err.data = data
+    err.status = res.status
+    throw err
+  }
+  return data
+}
+export async function consultarNfse(ref) {
+  const res = await apiFetch(`${BASE}/nfse/emitir/${encodeURIComponent(ref)}`)
+  const data = await res.json().catch(() => null)
+  if (!res.ok) {
+    const message = (data && (data.error || data.message)) || `Erro ao consultar NFS-e (HTTP ${res.status})`
+    const err = new Error(message)
+    err.data = data
+    err.status = res.status
+    throw err
+  }
+  return data
+}
+export async function previewNfsePdf(payload) {
+  const res = await apiFetch(`${BASE}/nfse/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error((data && (data.error || data.message)) || `Erro ao gerar prévia do PDF (HTTP ${res.status})`)
+  }
+  return res.blob()
+}
 
 // â”€â”€ WhatsApp â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function createWhatsAppInstance() {
@@ -687,6 +728,11 @@ export async function fetchAllAudit() {
 // ── NF ──────────────────────────────────────────────
 export async function fetchAllNf() {
   const res = await apiFetch(`${BASE}/nf`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+export async function fetchNfNextNumero() {
+  const res = await apiFetch(`${BASE}/nf/next-numero`)
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }

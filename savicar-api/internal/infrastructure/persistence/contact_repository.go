@@ -74,6 +74,10 @@ func (r *SQLServerContactRepository) Create(ctx context.Context, c *contact.Cont
 	query := `INSERT INTO CONTACT
 	 (ID_CUSTOMER, MOBILE_PHONE, IS_MOBILE_PHONE_WHATSAPP, EMAIL, ADDRESS, ID_CITY, NEIGHBORHOOD, ADDRESS_NUMBER)
 	 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{
+		c.IDCustomer, c.MobilePhone, c.IsMobilePhoneWhatsapp, c.Email, c.Address,
+		c.IDCity, c.Neighborhood, c.AddressNumber,
+	}))
 	result, err := r.db.ExecContext(ctx, query,
 		c.IDCustomer, c.MobilePhone, c.IsMobilePhoneWhatsapp, c.Email, c.Address,
 		c.IDCity, c.Neighborhood, c.AddressNumber,

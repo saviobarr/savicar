@@ -80,6 +80,7 @@ func (r *SQLServerServiceOrderProductsRepository) FindByOrderID(ctx context.Cont
 
 func (r *SQLServerServiceOrderProductsRepository) Create(ctx context.Context, sop *serviceorderproducts.ServiceOrderProduct) error {
 	query := "INSERT INTO SERVICE_ORDER_PRODUCTS (ID_ORDER, ID_PRODUCT, QUANTITY) VALUES (?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{sop.IDOrder, sop.IDProduct, sop.Quantity}))
 	result, err := r.db.ExecContext(ctx, query, sop.IDOrder, sop.IDProduct, sop.Quantity)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

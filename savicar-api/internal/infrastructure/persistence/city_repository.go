@@ -60,6 +60,7 @@ func (r *SQLServerCityRepository) FindByID(ctx context.Context, id int) (*city.C
 
 func (r *SQLServerCityRepository) Create(ctx context.Context, c *city.City) error {
 	query := "INSERT INTO CITY (ID_STATE, NAME, ABBREVIATION) VALUES (?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{c.IDState, c.Name, c.Abbreviation}))
 	result, err := r.db.ExecContext(ctx, query, c.IDState, c.Name, c.Abbreviation)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

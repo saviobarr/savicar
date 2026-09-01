@@ -21,6 +21,7 @@ func NewNFHandler(svc *nfsvc.Service) *NFHandler {
 func (h *NFHandler) RegisterRoutes(r gin.IRouter) {
 	g := r.Group("/nf")
 	g.GET("", h.getAll)
+	g.GET("/next-numero", h.nextNumero)
 	g.GET("/:id", h.getByID)
 	g.POST("", h.create)
 	g.PUT("/:id", h.update)
@@ -40,6 +41,21 @@ func (h *NFHandler) getAll(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, items)
+}
+
+// @Summary     Get the next nota fiscal number (highest existing + 1)
+// @Tags        nf
+// @Produce     json
+// @Success     200 {object} map[string]int
+// @Failure     500 {object} map[string]string
+// @Router      /nf/next-numero [get]
+func (h *NFHandler) nextNumero(c *gin.Context) {
+	next, err := h.svc.NextNumero(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"next_numero": next})
 }
 
 // @Summary     Get a nota fiscal by ID

@@ -78,9 +78,11 @@ func (rep *SQLServerServiceAppointmentResourceRepository) FindByID(ctx context.C
 }
 
 func (rep *SQLServerServiceAppointmentResourceRepository) Create(ctx context.Context, r *serviceappointmentresource.ServiceAppointmentResource) error {
+	query := `INSERT INTO SERVICE_APPOINTMENT_RESOURCES (ID_SERVICE_APPOINTMENT, ID_RESOURCE, ID_TECHNICIAN)
+		 VALUES (?, ?, ?)`
+	rep.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{r.IDServiceAppointment, r.IDResource, r.IDTechnician}))
 	result, err := rep.db.ExecContext(ctx,
-		`INSERT INTO SERVICE_APPOINTMENT_RESOURCES (ID_SERVICE_APPOINTMENT, ID_RESOURCE, ID_TECHNICIAN)
-		 VALUES (?, ?, ?)`,
+		query,
 		r.IDServiceAppointment, r.IDResource, r.IDTechnician,
 	)
 	if err != nil {

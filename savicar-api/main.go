@@ -26,8 +26,8 @@ import (
 
 	"savicar-api/db"
 	_ "savicar-api/docs"
+	"savicar-api/icon"
 	appcity "savicar-api/internal/application/city"
-	apptenantconfig "savicar-api/internal/application/tenantconfig"
 	appcontact "savicar-api/internal/application/contact"
 	appcostcategory "savicar-api/internal/application/costcategory"
 	appcountry "savicar-api/internal/application/country"
@@ -37,6 +37,7 @@ import (
 	appfuel "savicar-api/internal/application/fuel"
 	appinventory "savicar-api/internal/application/inventory"
 	appnf "savicar-api/internal/application/nf"
+	appnfse "savicar-api/internal/application/nfse"
 	appoperationalcosts "savicar-api/internal/application/operationalcosts"
 	apppayment "savicar-api/internal/application/payment"
 	apppaymentmethod "savicar-api/internal/application/paymentmethod"
@@ -51,16 +52,20 @@ import (
 	appservices "savicar-api/internal/application/services"
 	appstate "savicar-api/internal/application/state"
 	apptechnician "savicar-api/internal/application/technician"
+	apptenantconfig "savicar-api/internal/application/tenantconfig"
 	appunity "savicar-api/internal/application/unity"
 	appuser "savicar-api/internal/application/user"
 	appvehiclemake "savicar-api/internal/application/vehiclemake"
 	appvehiclemodel "savicar-api/internal/application/vehiclemodel"
-	"savicar-api/icon"
+	discovery "savicar-api/internal/infrastructure/discovery"
+	"savicar-api/internal/infrastructure/externalinvoice"
+	"savicar-api/internal/infrastructure/externallookup"
 	"savicar-api/internal/infrastructure/http/handler"
 	"savicar-api/internal/infrastructure/http/middleware"
-	"savicar-api/internal/infrastructure/externallookup"
+	"savicar-api/internal/infrastructure/nfsepdf"
 	"savicar-api/internal/infrastructure/persistence"
 	"savicar-api/internal/infrastructure/storage"
+
 	"github.com/getlantern/systray"
 )
 
@@ -101,6 +106,8 @@ func setupLogging() *os.File {
 	writer := io.MultiWriter(os.Stderr, logFile)
 	slog.SetDefault(slog.New(slog.NewTextHandler(writer, nil)))
 	log.SetOutput(writer)
+	gin.DefaultWriter = writer
+	gin.DefaultErrorWriter = writer
 	return logFile
 }
 
@@ -264,8 +271,17 @@ func main() {
 	// Tenant Config
 	tenantConfigRepo := persistence.NewSQLServerTenantConfigRepository(conn)
 	tenantConfigSvc := apptenantconfig.NewService(tenantConfigRepo)
-	tenantConfigHandler := handler.NewTenantConfigHandler(tenantConfigSvc)
+	tenantConfigHandler := handler.NewTenantConfigHandler(tenantConfigSvc, fileStorage)
+
+	// NFS-e
+	issuedNfRepo := persistence.NewSQLServerIssuedNFRepository(conn)
+	focusNfeClient := externalinvoice.NewFocusNfeClient()
+	nfsePreviewRenderer := nfsepdf.NewRenderer()
+	nfseSvc := appnfse.NewService(tenantConfigRepo, issuedNfRepo, nfRepo, focusNfeClient, nfsePreviewRenderer)
+	nfseHandler := handler.NewNfseHandler(nfseSvc)
+
 	whatsAppHandler := handler.NewWhatsAppHandler(tenantConfigSvc, serviceOrderSvc, paymentSvc, citySvc, stateSvc, conn)
+	vehicleLookupHandler := handler.NewVehicleLookupHandler()
 
 	r := gin.Default()
 	r.SetTrustedProxies(nil)
@@ -340,6 +356,8 @@ func main() {
 	financialReportHandler.RegisterRoutes(api)
 	tenantConfigHandler.RegisterRoutes(api)
 	whatsAppHandler.RegisterRoutes(api)
+	nfseHandler.RegisterRoutes(api)
+	vehicleLookupHandler.RegisterRoutes(api)
 	userHandler.RegisterRoutes(api)
 	auditHandler.RegisterRoutes(api)
 
@@ -362,6 +380,11 @@ func main() {
 			time.Sleep(200 * time.Millisecond)
 		}
 	}()
+
+	if err := discovery.StartDiscoveryListener(8080); err != nil {
+		slog.Error("could not start discovery service", "error", err)
+		// não é fatal — a API continua funcionando mesmo sem discovery
+	}
 
 	// System tray icon — right-click to open browser or quit
 	systray.Run(func() {

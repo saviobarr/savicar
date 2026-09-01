@@ -37,3 +37,13 @@ func (s *Service) Update(ctx context.Context, n *nf.NF) error {
 func (s *Service) Delete(ctx context.Context, id int) error {
 	return s.repo.Delete(ctx, id)
 }
+
+// NextNumero returns the number to use for the next nota fiscal: the
+// highest existing "numero" in the nf table, plus one.
+func (s *Service) NextNumero(ctx context.Context) (int, error) {
+	max, err := s.repo.GetMaxNumero(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return max + 1, nil
+}

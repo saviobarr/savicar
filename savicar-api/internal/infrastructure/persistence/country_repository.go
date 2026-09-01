@@ -60,6 +60,7 @@ func (r *SQLServerCountryRepository) FindByID(ctx context.Context, id int) (*cou
 
 func (r *SQLServerCountryRepository) Create(ctx context.Context, c *country.Country) error {
 	query := "INSERT INTO COUNTRY (NAME, ABBREVIATION) VALUES (?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{c.Name, c.Abbreviation}))
 	result, err := r.db.ExecContext(ctx, query, c.Name, c.Abbreviation)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

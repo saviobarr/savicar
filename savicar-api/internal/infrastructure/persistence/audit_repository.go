@@ -23,6 +23,7 @@ func NewSQLAuditRepository(db *sql.DB) *SQLAuditRepository {
 
 func (r *SQLAuditRepository) Save(ctx context.Context, a *audit.Audit) error {
 	query := "INSERT INTO AUDIT (ID_TENANT, USER, URL_CALLED, PAYLOAD, DT_TIME) VALUES (?, ?, ?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{a.IDTenant, a.User, a.URLCalled, a.Payload, a.DateTime.Format(time.DateTime)}))
 	_, err := r.db.ExecContext(ctx, query, a.IDTenant, a.User, a.URLCalled, a.Payload, a.DateTime.Format(time.DateTime))
 	if err != nil {
 		r.log.ErrorContext(ctx, "audit save failed", slog.Any("error", err))

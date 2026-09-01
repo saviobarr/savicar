@@ -83,6 +83,7 @@ func (r *SQLServerServiceOrderImageRepository) FindByID(ctx context.Context, id 
 
 func (r *SQLServerServiceOrderImageRepository) Create(ctx context.Context, img *serviceorderimage.ServiceOrderImage) error {
 	query := "INSERT INTO SERVICE_ORDER_IMAGES (ID_ORDER, IMAGE_PATH, VIDEO_PATH) VALUES (?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{img.IDOrder, img.ImagePath, img.VideoPath}))
 	result, err := r.db.ExecContext(ctx, query, img.IDOrder, img.ImagePath, img.VideoPath)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))
@@ -129,6 +130,13 @@ func derefInt(p *int) any {
 }
 
 func derefString(p *string) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+func derefFloat(p *float64) any {
 	if p == nil {
 		return nil
 	}

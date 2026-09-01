@@ -60,6 +60,7 @@ func (r *SQLServerStateRepository) FindByID(ctx context.Context, id int) (*state
 
 func (r *SQLServerStateRepository) Create(ctx context.Context, s *state.State) error {
 	query := "INSERT INTO STATE (ID_COUNTRY, NAME, ABBREVIATION) VALUES (?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{s.IDCountry, s.Name, s.Abbreviation}))
 	result, err := r.db.ExecContext(ctx, query, s.IDCountry, s.Name, s.Abbreviation)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

@@ -27,6 +27,10 @@ func (s *Service) GetByID(ctx context.Context, id int) (*services.Service, error
 }
 
 func (s *Service) Create(ctx context.Context, svc *services.Service) error {
+	if svc.Status == nil {
+		orcamento := 0
+		svc.Status = &orcamento
+	}
 	return s.repo.Create(ctx, svc)
 }
 
