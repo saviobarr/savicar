@@ -1,6 +1,7 @@
 ﻿package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -71,6 +72,7 @@ func (h *CustomerHandler) getByID(c *gin.Context) {
 // @Param       body body     customer.Customer true "Payload"
 // @Success     201  {object} customer.Customer
 // @Failure     400  {object} map[string]string
+// @Failure     409  {object} map[string]string
 // @Failure     500  {object} map[string]string
 // @Router      /customers [post]
 func (h *CustomerHandler) create(c *gin.Context) {
@@ -80,6 +82,11 @@ func (h *CustomerHandler) create(c *gin.Context) {
 		return
 	}
 	if err := h.svc.Create(c.Request.Context(), &item); err != nil {
+		var dupErr *customersvc.DuplicateTaxIDError
+		if errors.As(err, &dupErr) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

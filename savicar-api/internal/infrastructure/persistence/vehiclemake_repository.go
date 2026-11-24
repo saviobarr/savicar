@@ -21,7 +21,7 @@ func NewSQLServerVehicleMakeRepository(db *sql.DB) *SQLServerVehicleMakeReposito
 }
 
 func (r *SQLServerVehicleMakeRepository) FindAll(ctx context.Context) ([]vehiclemake.VehicleMake, error) {
-	query := "SELECT ID_MAKE, NAME FROM MAKE"
+	query := "SELECT ID_MAKE, NAME, TYPE FROM MAKE"
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		r.log.ErrorContext(ctx, "FindAll failed", slog.Any("error", err))
@@ -32,7 +32,28 @@ func (r *SQLServerVehicleMakeRepository) FindAll(ctx context.Context) ([]vehicle
 	var result []vehiclemake.VehicleMake
 	for rows.Next() {
 		var m vehiclemake.VehicleMake
-		if err := rows.Scan(&m.IDMake, &m.Name); err != nil {
+		if err := rows.Scan(&m.IDMake, &m.Name, &m.Type); err != nil {
+			return nil, err
+		}
+		m.Name = trimStringPtr(m.Name)
+		result = append(result, m)
+	}
+	return result, rows.Err()
+}
+
+func (r *SQLServerVehicleMakeRepository) FindByType(ctx context.Context, tipo int) ([]vehiclemake.VehicleMake, error) {
+	query := "SELECT ID_MAKE, NAME, TYPE FROM MAKE WHERE TYPE = ?"
+	rows, err := r.db.QueryContext(ctx, query, tipo)
+	if err != nil {
+		r.log.ErrorContext(ctx, "FindByType failed", slog.Int("tipo", tipo), slog.Any("error", err))
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []vehiclemake.VehicleMake
+	for rows.Next() {
+		var m vehiclemake.VehicleMake
+		if err := rows.Scan(&m.IDMake, &m.Name, &m.Type); err != nil {
 			return nil, err
 		}
 		m.Name = trimStringPtr(m.Name)
@@ -42,9 +63,9 @@ func (r *SQLServerVehicleMakeRepository) FindAll(ctx context.Context) ([]vehicle
 }
 
 func (r *SQLServerVehicleMakeRepository) FindByID(ctx context.Context, id int) (*vehiclemake.VehicleMake, error) {
-	query := "SELECT ID_MAKE, NAME FROM MAKE WHERE ID_MAKE = ?"
+	query := "SELECT ID_MAKE, NAME, TYPE FROM MAKE WHERE ID_MAKE = ?"
 	var m vehiclemake.VehicleMake
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&m.IDMake, &m.Name)
+	err := r.db.QueryRowContext(ctx, query, id).Scan(&m.IDMake, &m.Name, &m.Type)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -57,9 +78,9 @@ func (r *SQLServerVehicleMakeRepository) FindByID(ctx context.Context, id int) (
 }
 
 func (r *SQLServerVehicleMakeRepository) Create(ctx context.Context, m *vehiclemake.VehicleMake) error {
-	query := "INSERT INTO MAKE (NAME) VALUES (?)"
-	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{m.Name}))
-	result, err := r.db.ExecContext(ctx, query, m.Name)
+	query := "INSERT INTO MAKE (NAME, TYPE) VALUES (?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{m.Name, m.Type}))
+	result, err := r.db.ExecContext(ctx, query, m.Name, m.Type)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))
 		return err
@@ -73,7 +94,7 @@ func (r *SQLServerVehicleMakeRepository) Create(ctx context.Context, m *vehiclem
 }
 
 func (r *SQLServerVehicleMakeRepository) Update(ctx context.Context, m *vehiclemake.VehicleMake) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE MAKE SET NAME = ? WHERE ID_MAKE = ?", m.Name, m.IDMake)
+	_, err := r.db.ExecContext(ctx, "UPDATE MAKE SET NAME = ?, TYPE = ? WHERE ID_MAKE = ?", m.Name, m.Type, m.IDMake)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Update failed", slog.Int("id", m.IDMake), slog.Any("error", err))
 	}

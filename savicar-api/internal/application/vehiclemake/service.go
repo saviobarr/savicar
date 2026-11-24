@@ -15,6 +15,10 @@ func (s *Service) GetAll(ctx context.Context) ([]vehiclemake.VehicleMake, error)
 	return s.repo.FindAll(ctx)
 }
 
+func (s *Service) GetByType(ctx context.Context, tipo int) ([]vehiclemake.VehicleMake, error) {
+	return s.repo.FindByType(ctx, tipo)
+}
+
 func (s *Service) GetByID(ctx context.Context, id int) (*vehiclemake.VehicleMake, error) {
 	m, err := s.repo.FindByID(ctx, id)
 	if err != nil {

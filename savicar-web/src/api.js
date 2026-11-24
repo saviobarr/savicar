@@ -55,9 +55,19 @@ export function imageFileUrl(idImage) {
   return `${BASE}/service-order-images/${idImage}/file`
 }
 
+// The file route requires auth, and a plain <img src> can't send the
+// Authorization header — so callers that render the file inline (as
+// opposed to linking out to it) fetch it as a blob and use an object URL.
+export async function fetchImageBlob(idImage) {
+  const res = await apiFetch(`${BASE}/service-order-images/${idImage}/file`)
+  if (!res.ok) throw new Error('Erro ao carregar arquivo')
+  return res.blob()
+}
+
 // â”€â”€ VehicleMake â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-export async function fetchAllVehicleMake() {
-  const res = await apiFetch(`${BASE}/makes`)
+export async function fetchAllVehicleMake(tipo) {
+  const url = tipo != null ? `${BASE}/makes?tipo=${tipo}` : `${BASE}/makes`
+  const res = await apiFetch(url)
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
@@ -172,7 +182,12 @@ export async function fetchCustomerById(id) {
 }
 export async function createCustomer(data) {
   const res = await apiFetch(`${BASE}/customers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) {
+    const text = await res.text()
+    let message = text
+    try { message = JSON.parse(text).error || text } catch {}
+    throw new Error(message)
+  }
   return res.json()
 }
 export async function updateCustomer(id, data) {
@@ -298,6 +313,14 @@ export async function updateCustomerModel(id, data) {
 export async function deleteCustomerModel(id) {
   const res = await apiFetch(`${BASE}/customer-models/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(await res.text())
+}
+
+// Looks up vehicle data for a plate — the backend checks our own records
+// first, then falls back to the paid external plate-lookup service.
+export async function fetchVehicleByPlate(plate) {
+  const res = await apiFetch(`${BASE}/vehicle-lookup/${encodeURIComponent(plate)}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
 }
 
 // â”€â”€ Unity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -630,8 +653,12 @@ export async function emitirNfse(payload) {
   }
   return data
 }
-export async function consultarNfse(ref) {
-  const res = await apiFetch(`${BASE}/nfse/emitir/${encodeURIComponent(ref)}`)
+export async function consultarNfse(ref, tomador, valorServico) {
+  const params = new URLSearchParams()
+  if (tomador) params.set('tomador', tomador)
+  if (valorServico) params.set('valor_servico', valorServico)
+  const qs = params.toString()
+  const res = await apiFetch(`${BASE}/nfse/emitir/${encodeURIComponent(ref)}${qs ? `?${qs}` : ''}`)
   const data = await res.json().catch(() => null)
   if (!res.ok) {
     const message = (data && (data.error || data.message)) || `Erro ao consultar NFS-e (HTTP ${res.status})`
@@ -667,6 +694,20 @@ export async function sendServiceOrderWhatsApp(orderId, phoneOverride = '') {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ order_id: orderId, phone_override: phoneOverride }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error(data.message || data.error || 'Erro ao enviar')
+    err.code = data.error
+    throw err
+  }
+  return data
+}
+export async function sendServiceOrderImagesWhatsApp(orderId, imageIds, phoneOverride = '') {
+  const res = await apiFetch(`${BASE}/whatsapp/send-images`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order_id: orderId, image_ids: imageIds, phone_override: phoneOverride }),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
@@ -726,8 +767,9 @@ export async function fetchAllAudit() {
 }
 
 // ── NF ──────────────────────────────────────────────
-export async function fetchAllNf() {
-  const res = await apiFetch(`${BASE}/nf`)
+export async function fetchAllNf(tipo) {
+  const url = tipo != null ? `${BASE}/nf?tipo=${tipo}` : `${BASE}/nf`
+  const res = await apiFetch(url)
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
@@ -777,3 +819,22 @@ export async function deleteProdutoNf(id) {
   if (!res.ok) throw new Error(await res.text())
 }
 
+// ── Notifications ─────────────────────────────────────
+export async function fetchAllNotifications() {
+  const res = await apiFetch(`${BASE}/notifications`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+export async function fetchUnreadNotificationCount() {
+  const res = await apiFetch(`${BASE}/notifications/unread-count`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+export async function markNotificationRead(id) {
+  const res = await apiFetch(`${BASE}/notifications/${id}/read`, { method: 'PUT' })
+  if (!res.ok) throw new Error(await res.text())
+}
+export async function markAllNotificationsRead() {
+  const res = await apiFetch(`${BASE}/notifications/read-all`, { method: 'PUT' })
+  if (!res.ok) throw new Error(await res.text())
+}

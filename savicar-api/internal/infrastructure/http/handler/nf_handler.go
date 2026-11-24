@@ -31,10 +31,26 @@ func (h *NFHandler) RegisterRoutes(r gin.IRouter) {
 // @Summary     List all notas fiscais
 // @Tags        nf
 // @Produce     json
+// @Param       tipo query    int false "Filter by tipo (1=NFS-e, 2=NF-e, 3=NFC-e)"
 // @Success     200 {array}  nf.NF
+// @Failure     400 {object} map[string]string
 // @Failure     500 {object} map[string]string
 // @Router      /nf [get]
 func (h *NFHandler) getAll(c *gin.Context) {
+	if tipoStr := c.Query("tipo"); tipoStr != "" {
+		tipo, err := strconv.Atoi(tipoStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tipo"})
+			return
+		}
+		items, err := h.svc.GetByTipo(c.Request.Context(), tipo)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, items)
+		return
+	}
 	items, err := h.svc.GetAll(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

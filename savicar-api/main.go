@@ -38,6 +38,7 @@ import (
 	appinventory "savicar-api/internal/application/inventory"
 	appnf "savicar-api/internal/application/nf"
 	appnfse "savicar-api/internal/application/nfse"
+	appnotification "savicar-api/internal/application/notification"
 	appoperationalcosts "savicar-api/internal/application/operationalcosts"
 	apppayment "savicar-api/internal/application/payment"
 	apppaymentmethod "savicar-api/internal/application/paymentmethod"
@@ -58,6 +59,7 @@ import (
 	appvehiclemake "savicar-api/internal/application/vehiclemake"
 	appvehiclemodel "savicar-api/internal/application/vehiclemodel"
 	discovery "savicar-api/internal/infrastructure/discovery"
+	"savicar-api/internal/infrastructure/erroralert"
 	"savicar-api/internal/infrastructure/externalinvoice"
 	"savicar-api/internal/infrastructure/externallookup"
 	"savicar-api/internal/infrastructure/http/handler"
@@ -87,6 +89,15 @@ func serveEmbedded(c *gin.Context, subFS fs.FS, path string) {
 
 const uploadBasePath = "/home/savio/savicar-img"
 
+// bestEffortWriter swallows write errors from w so it can sit in an
+// io.MultiWriter without aborting writes to the other writers when w fails.
+type bestEffortWriter struct{ w io.Writer }
+
+func (b bestEffortWriter) Write(p []byte) (int, error) {
+	b.w.Write(p)
+	return len(p), nil
+}
+
 // setupLogging writes slog output to both stderr and a log file next to the
 // running executable. The packaged .exe is built with -H windowsgui (no
 // console window), so without this, errors are otherwise invisible once deployed.
@@ -103,8 +114,14 @@ func setupLogging() *os.File {
 		return nil
 	}
 
-	writer := io.MultiWriter(os.Stderr, logFile)
-	slog.SetDefault(slog.New(slog.NewTextHandler(writer, nil)))
+	// logFile first: io.MultiWriter aborts on the first writer that errors,
+	// and os.Stderr has no valid handle under -H windowsgui (no console
+	// attached), which was silently discarding every write before it ever
+	// reached the file. bestEffortWriter keeps stderr best-effort so a
+	// failure there can no longer block the file write.
+	writer := io.MultiWriter(logFile, bestEffortWriter{os.Stderr})
+	base := slog.NewTextHandler(writer, nil)
+	slog.SetDefault(slog.New(erroralert.Wrap(base, erroralert.NewSenderFromEnv())))
 	log.SetOutput(writer)
 	gin.DefaultWriter = writer
 	gin.DefaultErrorWriter = writer
@@ -196,21 +213,31 @@ func main() {
 	serviceAppointmentSvc := appserviceappointment.NewService(serviceAppointmentRepo, sarRepo)
 	serviceAppointmentHandler := handler.NewServiceAppointmentHandler(serviceAppointmentSvc)
 
+	// Users (created early so Notification can look up admins by tenant)
+	userRepo := persistence.NewSQLServerUserRepository(conn)
+	userSvc := appuser.NewService(userRepo)
+	userHandler := handler.NewUserHandler(userSvc)
+
+	// Notifications (created before Service Order so it can be injected there)
+	notificationRepo := persistence.NewSQLServerNotificationRepository(conn)
+	notificationSvc := appnotification.NewService(notificationRepo, userRepo)
+	notificationHandler := handler.NewNotificationHandler(notificationSvc)
+
 	// Service Order (wired after products repo below)
 	serviceOrderRepo := persistence.NewSQLServerServiceOrderRepository(conn)
 
 	// Services
 	servicesRepo := persistence.NewSQLServerServicesRepository(conn)
-	servicesSvc := appservices.NewService(servicesRepo)
+	servicesSvc := appservices.NewService(servicesRepo, notificationSvc)
 	servicesHandler := handler.NewServicesHandler(servicesSvc)
 
 	// Service Order Products
 	serviceOrderProductsRepo := persistence.NewSQLServerServiceOrderProductsRepository(conn)
-	serviceOrderProductsSvc := appserviceorderproducts.NewService(serviceOrderProductsRepo, inventoryRepo, serviceOrderRepo)
+	serviceOrderProductsSvc := appserviceorderproducts.NewService(serviceOrderProductsRepo, inventoryRepo, serviceOrderRepo, notificationSvc)
 	serviceOrderProductsHandler := handler.NewServiceOrderProductsHandler(serviceOrderProductsSvc)
 
 	// Service Order service wired after products repo
-	serviceOrderSvc := appserviceorder.NewService(serviceOrderRepo, serviceOrderProductsRepo, inventoryRepo)
+	serviceOrderSvc := appserviceorder.NewService(serviceOrderRepo, serviceOrderProductsRepo, inventoryRepo, notificationSvc)
 	serviceOrderHandler := handler.NewServiceOrderHandler(serviceOrderSvc)
 
 	// Payment Method
@@ -263,11 +290,6 @@ func main() {
 	citySvc := appcity.NewService(cityRepo)
 	cityHandler := handler.NewCityHandler(citySvc)
 
-	// Users
-	userRepo := persistence.NewSQLServerUserRepository(conn)
-	userSvc := appuser.NewService(userRepo)
-	userHandler := handler.NewUserHandler(userSvc)
-
 	// Tenant Config
 	tenantConfigRepo := persistence.NewSQLServerTenantConfigRepository(conn)
 	tenantConfigSvc := apptenantconfig.NewService(tenantConfigRepo)
@@ -280,11 +302,12 @@ func main() {
 	nfseSvc := appnfse.NewService(tenantConfigRepo, issuedNfRepo, nfRepo, focusNfeClient, nfsePreviewRenderer)
 	nfseHandler := handler.NewNfseHandler(nfseSvc)
 
-	whatsAppHandler := handler.NewWhatsAppHandler(tenantConfigSvc, serviceOrderSvc, paymentSvc, citySvc, stateSvc, conn)
-	vehicleLookupHandler := handler.NewVehicleLookupHandler()
+	whatsAppHandler := handler.NewWhatsAppHandler(tenantConfigSvc, serviceOrderSvc, paymentSvc, citySvc, stateSvc, svc, conn)
+	vehicleLookupHandler := handler.NewVehicleLookupHandler(customerModelSvc)
 
 	r := gin.Default()
 	r.SetTrustedProxies(nil)
+	r.Use(middleware.Recovery())
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,
 		AllowMethods:    []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -296,6 +319,12 @@ func main() {
 	handler.RegisterAuthRoutes(r, conn)
 	tenantConfigHandler.RegisterPublicRoutes(r)
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// Lightweight reachability check — used by the mobile app to detect
+	// whether the server is reachable before syncing offline-queued data.
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 
 	// Frontend static files served from embedded FS — no auth needed.
 	// Uses fs.ReadFile + c.Data to avoid http.FileServer redirect loops.
@@ -360,6 +389,7 @@ func main() {
 	vehicleLookupHandler.RegisterRoutes(api)
 	userHandler.RegisterRoutes(api)
 	auditHandler.RegisterRoutes(api)
+	notificationHandler.RegisterRoutes(api)
 
 	// Start HTTP server in background
 	go func() {
@@ -374,7 +404,7 @@ func main() {
 			resp, err := http.Get("http://localhost:8080/index.html")
 			if err == nil {
 				resp.Body.Close()
-				exec.Command("cmd", "/c", "start", "http://localhost:8080").Start()
+				exec.Command("cmd", "/c", "start", "http://localhost:8080/service-orders").Start()
 				return
 			}
 			time.Sleep(200 * time.Millisecond)
@@ -399,7 +429,7 @@ func main() {
 		for {
 			select {
 			case <-mOpen.ClickedCh:
-				exec.Command("cmd", "/c", "start", "http://localhost:8080").Start()
+				exec.Command("cmd", "/c", "start", "http://localhost:8080/service-orders").Start()
 			case <-mQuit.ClickedCh:
 				systray.Quit()
 				os.Exit(0)

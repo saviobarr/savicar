@@ -5,11 +5,26 @@ import (
 	"fmt"
 
 	"savicar-api/internal/domain/services"
+	"savicar-api/internal/domain/user"
 )
 
-type Service struct{ repo services.Repository }
+// Actor identifies who is calling Create, taken from the JWT claims in the
+// request context — used to decide whether admins should be notified.
+type Actor struct {
+	UserID   int
+	UserName string
+	Profile  int
+	IDTenant int
+}
 
-func NewService(repo services.Repository) *Service { return &Service{repo: repo} }
+type Service struct {
+	repo     services.Repository
+	notifier services.Notifier
+}
+
+func NewService(repo services.Repository, notifier services.Notifier) *Service {
+	return &Service{repo: repo, notifier: notifier}
+}
 
 func (s *Service) GetAll(ctx context.Context) ([]services.Service, error) {
 	return s.repo.FindAll(ctx)
@@ -26,12 +41,23 @@ func (s *Service) GetByID(ctx context.Context, id int) (*services.Service, error
 	return svc, nil
 }
 
-func (s *Service) Create(ctx context.Context, svc *services.Service) error {
+func (s *Service) Create(ctx context.Context, svc *services.Service, actor Actor) error {
 	if svc.Status == nil {
 		orcamento := 0
 		svc.Status = &orcamento
 	}
-	return s.repo.Create(ctx, svc)
+	if err := s.repo.Create(ctx, svc); err != nil {
+		return err
+	}
+	if s.notifier != nil && actor.Profile == int(user.ProfileTechnician) && svc.IDOrder != nil {
+		name := actor.UserName
+		if name == "" {
+			name = "Um mecânico"
+		}
+		msg := fmt.Sprintf("Tecnico %s adicionou serviço na OS #%d", name, *svc.IDOrder)
+		_ = s.notifier.NotifyAdmins(ctx, actor.IDTenant, *svc.IDOrder, msg)
+	}
+	return nil
 }
 
 func (s *Service) Update(ctx context.Context, svc *services.Service) error {

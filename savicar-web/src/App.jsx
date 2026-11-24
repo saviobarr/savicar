@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import LoginPage from './pages/LoginPage'
 import { getToken, clearToken, getProfile, clearProfile, clearUserId } from './api'
+import NotificationBell from './components/NotificationBell'
 
 const PROFILE_TECNICO = 3
+const PROFILE_ADMIN = 1
 
 function PrivateRoute({ children }) {
   return getToken() ? children : <Navigate to="/login" replace />
@@ -35,6 +37,7 @@ import UsersPage, { UserNewPage, UserEditPage } from './pages/UsersPage'
 import AuditPage from './pages/AuditPage'
 import NfPage, { NfNewPage, NfEditPage } from './pages/NfPage'
 import NfsePage from './pages/NfsePage'
+import NfseListPage from './pages/NfseListPage'
 import './App.css'
 
 const NAV_LINKS = [
@@ -43,7 +46,7 @@ const NAV_LINKS = [
   {
     label: 'Notas Fiscais',
     children: [
-      { to: '/nfse', label: 'NFS-e (Serviços)' },
+      { to: '/nfse-lista', label: 'NFS-e (Serviços)' },
       { to: '/nf', label: 'NF-e (Vendas)' },
     ],
   },
@@ -78,6 +81,7 @@ function AppShell() {
   const toggleGroup = label => setOpenGroups(prev => ({ ...prev, [label]: !prev[label] }))
   const profile = getProfile()
   const isTecnico = profile === PROFILE_TECNICO
+  const isAdmin = profile === PROFILE_ADMIN
 
   function handleLogout() {
     clearToken()
@@ -91,13 +95,16 @@ function AppShell() {
       <aside className={`sidebar${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
         <div className="sidebar-logo">
           {sidebarOpen && <img src={`${import.meta.env.VITE_API_URL ?? ''}/tenant-config/logo`} alt="Logo" />}
-          <button
-            className="sidebar-toggle"
-            onClick={() => setSidebarOpen(o => !o)}
-            title={sidebarOpen ? 'Recolher menu' : 'Expandir menu'}
-          >
-            {sidebarOpen ? '◀' : '▶'}
-          </button>
+          <div className="sidebar-logo-toolbar">
+            {sidebarOpen && isAdmin && <NotificationBell />}
+            <button
+              className="sidebar-toggle"
+              onClick={() => setSidebarOpen(o => !o)}
+              title={sidebarOpen ? 'Recolher menu' : 'Expandir menu'}
+            >
+              {sidebarOpen ? '◀' : '▶'}
+            </button>
+          </div>
         </div>
         {sidebarOpen && <nav>
           {(isTecnico ? NAV_LINKS.filter(l => l.to === '/service-orders') : NAV_LINKS).map(({ to, label, highlight, children }) =>
@@ -292,6 +299,7 @@ function AppShell() {
           <Route path="/nf" element={<NfPage />} />
 
           <Route path="/nfse" element={<NfsePage />} />
+          <Route path="/nfse-lista" element={<NfseListPage />} />
 
           <Route path="/services/new" element={<ServicesNewPage />} />
           <Route path="/services/edit" element={<ServicesEditPage />} />

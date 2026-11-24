@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
-import CrudPage from '../components/CrudPage'
 import { makeFormPages } from '../components/CrudFormPage'
 import { loadFilters, saveFilters } from '../filterStorage'
 import { NewCustomerModal, NewCarModal } from './ServiceOrderPage'
@@ -19,6 +18,7 @@ import {
   updateAppointmentResource,
   deleteAppointmentResource,
 } from '../api'
+import { serverNow } from '../serverClock'
 
 // ── Status domain ─────────────────────────────────────────────
 export const STATUS_LABELS = {
@@ -99,15 +99,26 @@ function normalizeForDB(val) {
 
 function DateTimeInput({ label, isoValue, onChange }) {
   const [display, setDisplay] = useState(() => isoToDisplay(isoValue))
+  const pickerRef = useRef(null)
   function handleChange(e) {
     const masked = maskDatetime(e.target.value)
     setDisplay(masked)
     onChange(displayToISO(masked))
   }
+  function handlePicker(e) {
+    if (!e.target.value) return
+    const iso = e.target.value.replace('T', ' ') + ':00'
+    setDisplay(isoToDisplay(iso))
+    onChange(iso)
+  }
   return (
     <div className="form-group">
       <label>{label}</label>
-      <input type="text" value={display} onChange={handleChange} placeholder="dd/mm/aaaa hh:mm" maxLength={16} />
+      <div className="date-picker-wrapper" style={{ width: 'fit-content' }}>
+        <input type="text" value={display} onChange={handleChange} placeholder="dd/mm/aaaa hh:mm" maxLength={16} style={{ width: '150px', flex: 'none' }} />
+        <input type="datetime-local" ref={pickerRef} className="hidden-date-picker" onChange={handlePicker} />
+        <button type="button" className="btn-calendar" onClick={() => pickerRef.current?.showPicker()}>📅</button>
+      </div>
     </div>
   )
 }
@@ -308,14 +319,6 @@ function CustomerModelAutocomplete({ value, onChange, idCustomer, allModels }) {
   )
 }
 
-// ── Table columns ─────────────────────────────────────────────
-const FIELDS = [
-  { key: 'start_at',      label: 'Início',   render: v => fmtDatetimeBR(v) },
-  { key: 'customer_name', label: 'Cliente',  render: v => v ?? '—' },
-  { key: 'plate_number',  label: 'Veículo',  render: (v, item) => [item.model_name, v].filter(Boolean).join(' · ') || '—' },
-  { key: 'status',        label: 'Status',   render: v => <StatusBadge status={v} /> },
-]
-
 // ── Draft persistence for the "new appointment" form ──────────
 // Lets a user navigate away mid-fill and resume later, since the
 // form lives on its own route (/appointments/new) that unmounts
@@ -349,12 +352,12 @@ export function clearAppointmentDraft() {
 
 // ── Form ──────────────────────────────────────────────────────
 export function ServiceAppointmentForm({ initialData, onSaved, onCancel }) {
-  const isEdit = !!initialData
-  const draft = isEdit ? null : loadAppointmentDraft()
+  const isEdit = !!initialData?.id_service_appointment
+  const draft = isEdit || initialData ? null : loadAppointmentDraft()
 
   const [startAt,         setStartAt]         = useState(() => draft?.startAt ?? normalizeForDB(initialData?.start_at))
   const [endAt,           setEndAt]           = useState(() => draft?.endAt ?? normalizeForDB(initialData?.end_at))
-  const [status,          setStatus]          = useState(draft?.status ?? initialData?.status ?? '')
+  const [status,          setStatus]          = useState(draft?.status ?? initialData?.status ?? (isEdit ? '' : 1))
   const [notes,           setNotes]           = useState(draft?.notes ?? initialData?.notes ?? '')
   const [idCustomerModel, setIdCustomerModel] = useState(draft?.idCustomerModel ?? initialData?.id_customer_model ?? '')
   const [idCustomer,      setIdCustomer]      = useState(draft?.idCustomer ?? '')
@@ -697,166 +700,348 @@ export function ServiceAppointmentForm({ initialData, onSaved, onCancel }) {
 export const { NewPage: ServiceAppointmentNewPage, EditPage: ServiceAppointmentEditPage } =
   makeFormPages(ServiceAppointmentForm, 'Agendamentos', '/appointments')
 
-function maskDate(val) {
-  const d = val.replace(/\D/g, '').slice(0, 8)
-  let r = d
-  if (d.length > 2) r = d.slice(0, 2) + '/' + d.slice(2)
-  if (d.length > 4) r = d.slice(0, 2) + '/' + d.slice(2, 4) + '/' + d.slice(4)
-  return r
+// ── Weekly calendar list ──────────────────────────────────────
+const HOUR_H = 56
+const DEFAULT_START_H = 7
+const DEFAULT_END_H = 19
+const WEEKDAYS = ['DOM.', 'SEG.', 'TER.', 'QUA.', 'QUI.', 'SEX.', 'SÁB.']
+const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+
+function pad2(n) { return String(n).padStart(2, '0') }
+
+function parseLocal(val) {
+  if (!val) return null
+  const s = String(val)
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/)
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5])
+  const d = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  return d ? new Date(+d[1], +d[2] - 1, +d[3], 0, 0) : null
 }
 
-function brDateToISO(br) {
-  const d = br.replace(/\D/g, '')
-  if (d.length !== 8) return ''
-  return `${d.slice(4, 8)}-${d.slice(2, 4)}-${d.slice(0, 2)}`
+function startOfWeek(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  x.setDate(x.getDate() - x.getDay())
+  return x
 }
 
-function todayBR() {
-  const [y, m, d] = new Date().toISOString().slice(0, 10).split('-')
-  return `${d}/${m}/${y}`
+function addDays(d, n) {
+  const x = new Date(d)
+  x.setDate(x.getDate() + n)
+  return x
+}
+
+function sameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+function fmtHM(d) { return `${d.getHours()}:${pad2(d.getMinutes())}` }
+
+function layoutDay(events) {
+  const sorted = [...events].sort((a, b) => a.sMin - b.sMin || a.eMin - b.eMin)
+  const out = []
+  let cluster = []
+  let clusterEnd = -1
+  function flush() {
+    const cols = []
+    cluster.forEach(ev => {
+      let c = cols.findIndex(end => end <= ev.sMin)
+      if (c === -1) { c = cols.length; cols.push(ev.eMin) } else { cols[c] = ev.eMin }
+      ev.col = c
+    })
+    cluster.forEach(ev => { ev.cols = cols.length })
+    out.push(...cluster)
+    cluster = []
+  }
+  sorted.forEach(ev => {
+    if (cluster.length && ev.sMin >= clusterEnd) { flush(); clusterEnd = -1 }
+    cluster.push(ev)
+    clusterEnd = Math.max(clusterEnd, ev.eMin)
+  })
+  if (cluster.length) flush()
+  return out
 }
 
 const APPOINTMENT_FILTERS_KEY = '/appointments:extra-filters'
 
 export default function ServiceAppointmentPage() {
   const navigate = useNavigate()
-  const initialAppointmentFilters = loadFilters(APPOINTMENT_FILTERS_KEY, {
-    filterStatus: '',
-    fromDisplay: todayBR(),
-    toDisplay: todayBR(),
-  })
-  const [filterStatus,   setFilterStatus]   = useState(initialAppointmentFilters.filterStatus)
-  const [fromDisplay,    setFromDisplay]    = useState(initialAppointmentFilters.fromDisplay)
-  const [toDisplay,      setToDisplay]      = useState(initialAppointmentFilters.toDisplay)
-  const [resumingDraft]  = useState(() => !!loadAppointmentDraft())
-  const fromPickerRef = useRef(null)
-  const toPickerRef   = useRef(null)
+  const savedFilters = loadFilters(APPOINTMENT_FILTERS_KEY, { filterStatus: '', search: '' })
+  const [filterStatus, setFilterStatus] = useState(savedFilters.filterStatus ?? '')
+  const [search, setSearch] = useState(savedFilters.search ?? '')
+  const [resumingDraft] = useState(() => !!loadAppointmentDraft())
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(serverNow()))
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [tooltip, setTooltip] = useState(null)
+  const [selected, setSelected] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const pickerRef = useRef(null)
 
   useEffect(() => {
     if (resumingDraft) navigate('/appointments/new', { replace: true })
   }, [])
 
   useEffect(() => {
-    saveFilters(APPOINTMENT_FILTERS_KEY, { filterStatus, fromDisplay, toDisplay })
-  }, [filterStatus, fromDisplay, toDisplay])
+    saveFilters(APPOINTMENT_FILTERS_KEY, { filterStatus, search })
+  }, [filterStatus, search])
 
-  const fromISO = brDateToISO(fromDisplay)
-  const toISO   = brDateToISO(toDisplay)
-
-  function additionalFilter(item) {
-    if (filterStatus && String(item.status) !== filterStatus) return false
-    const itemDate = item.start_at ? String(item.start_at).slice(0, 10) : ''
-    if (itemDate) {
-      if (fromISO && itemDate < fromISO) return false
-      if (toISO   && itemDate > toISO)   return false
+  async function load() {
+    setLoading(true)
+    setError(null)
+    try {
+      setItems((await fetchAllServiceAppointment()) ?? [])
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
-    return true
   }
 
-  const hasFilter = filterStatus || fromISO || toISO
+  useEffect(() => { load() }, [])
 
   if (resumingDraft) return null
 
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
+  const weekEnd = addDays(weekStart, 7)
+  const q = search.trim().toLowerCase()
+
+  const appts = items
+    .map(item => {
+      const start = parseLocal(item.start_at)
+      if (!start) return null
+      let end = parseLocal(item.end_at)
+      if (!end || end <= start) end = new Date(start.getTime() + 60 * 60000)
+      const sMin = start.getHours() * 60 + start.getMinutes()
+      const eMin = sameDay(start, end) ? Math.max(end.getHours() * 60 + end.getMinutes(), sMin + 30) : 1440
+      return { item, start, end, sMin, eMin }
+    })
+    .filter(Boolean)
+    .filter(a => a.start >= weekStart && a.start < weekEnd)
+    .filter(a => !filterStatus || String(a.item.status) === filterStatus)
+    .filter(a => !q || [a.item.customer_name, a.item.plate_number, a.item.model_name].join(' ').toLowerCase().includes(q))
+
+  const minH = Math.min(DEFAULT_START_H, ...appts.map(a => Math.floor(a.sMin / 60)))
+  const maxH = Math.max(DEFAULT_END_H, ...appts.map(a => Math.ceil(a.eMin / 60)))
+  const totalH = maxH - minH
+  const hours = Array.from({ length: totalH }, (_, i) => minH + i)
+
+  const first = weekDays[0]
+  const last = weekDays[6]
+  const rangeLabel = `${first.getDate()} ${MONTHS[first.getMonth()]} – ${last.getDate()} ${MONTHS[last.getMonth()]} ${last.getFullYear()}`
+  const today = serverNow()
+
+  function showTooltip(e, a) {
+    const r = e.currentTarget.getBoundingClientRect()
+    const flip = r.right + 280 > window.innerWidth
+    setTooltip({ a, x: flip ? r.left - 8 : r.right + 8, y: r.top, flip })
+  }
+
+  function newAtSlot(e, day) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const slot = Math.floor(((e.clientY - rect.top) / HOUR_H) * 2)
+    const startMin = minH * 60 + slot * 30
+    const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, startMin)
+    const end = new Date(start.getTime() + 60 * 60000)
+    const fmt = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:00`
+    navigate('/appointments/new', { state: { initialData: { start_at: fmt(start), end_at: fmt(end) } } })
+  }
+
+  function openOS(item) {
+    navigate('/service-orders/new', {
+      state: { initialData: {
+        id_customer:           item.id_customer,
+        id_customer_model:     item.id_customer_model,
+        estimated_delivery_at: item.end_at,
+      }},
+    })
+  }
+
+  async function handleDelete(item) {
+    if (!window.confirm('Deseja excluir este agendamento?')) return
+    setDeleting(true)
+    try {
+      await deleteServiceAppointment(item.id_service_appointment)
+      setSelected(null)
+      await load()
+    } catch (err) {
+      alert('Erro ao excluir: ' + err.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
-    <CrudPage
-      title="📅 Agendamentos"
-      fetchAll={fetchAllServiceAppointment}
-      deleteItem={deleteServiceAppointment}
-      fields={FIELDS}
-      idKey="id_service_appointment"
-      FormComponent={ServiceAppointmentForm}
-      filterKeys={['customer_name', 'plate_number']}
-      filterPlaceholder="Filtrar por cliente ou placa..."
-      createLabel="+ Novo Agendamento"
-      pageSize={20}
-      basePath="/appointments"
-      additionalFilter={hasFilter ? additionalFilter : null}
-      rowActions={item => (
-        <button
-          className="btn-os"
-          title="Abrir Ordem de Serviço para este agendamento"
-          onClick={() => navigate('/service-orders/new', {
-            state: { initialData: {
-              id_customer:           item.id_customer,
-              id_customer_model:     item.id_customer_model,
-              estimated_delivery_at: item.end_at,
+    <div className="crud-page">
+      <div className="crud-toolbar">
+        <h2>📅 Agendamentos</h2>
+        <button className="btn-novo" onClick={() => navigate('/appointments/new')}>+ Novo Agendamento</button>
+      </div>
+
+      <div className="crud-filters" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
+        <input
+          className="crud-search"
+          type="text"
+          placeholder="Filtrar por cliente ou placa..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setFilterStatus('')}
+            style={{
+              padding: '3px 12px', borderRadius: 12, fontSize: '0.78rem', fontWeight: 600,
+              cursor: 'pointer',
+              border: filterStatus === '' ? '2px solid #60a5fa' : '2px solid transparent',
+              background: filterStatus === '' ? '#1e3a5f' : '#2a2d3a',
+              color: filterStatus === '' ? '#93c5fd' : '#9ca3af',
+              transition: 'all 0.15s',
             }}
+          >Todos</button>
+          {STATUS_OPTIONS.map(opt => {
+            const color = STATUS_COLORS[opt.value] ?? '#6b7280'
+            const active = String(filterStatus) === String(opt.value)
+            return (
+              <button
+                key={opt.value}
+                onClick={() => setFilterStatus(active ? '' : String(opt.value))}
+                style={{
+                  padding: '3px 12px', borderRadius: 12, fontSize: '0.78rem', fontWeight: 600,
+                  cursor: 'pointer',
+                  background: active ? color : '#2a2d3a',
+                  color: active ? '#fff' : '#9ca3af',
+                  border: active ? `2px solid ${color}` : '2px solid transparent',
+                  opacity: active ? 1 : 0.75,
+                  transition: 'all 0.15s',
+                }}
+              >{opt.label}</button>
+            )
           })}
-        >
-          Abrir OS
-        </button>
-      )}
-      extraFilters={
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
-          {/* Status badge filters */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => setFilterStatus('')}
-              style={{
-                padding: '3px 12px', borderRadius: 12, fontSize: '0.78rem', fontWeight: 600,
-                cursor: 'pointer',
-                border: filterStatus === '' ? '2px solid #60a5fa' : '2px solid transparent',
-                background: filterStatus === '' ? '#1e3a5f' : '#2a2d3a',
-                color: filterStatus === '' ? '#93c5fd' : '#9ca3af',
-                transition: 'all 0.15s',
-              }}
-            >Todos</button>
-            {STATUS_OPTIONS.map(opt => {
-              const color = STATUS_COLORS[opt.value] ?? '#6b7280'
-              const active = String(filterStatus) === String(opt.value)
+        </div>
+      </div>
+
+      <div className="cal-nav">
+        <button type="button" className="cal-nav-btn" onClick={() => setWeekStart(w => addDays(w, -7))} title="Semana anterior">‹</button>
+        <button type="button" className="cal-nav-btn" onClick={() => setWeekStart(startOfWeek(serverNow()))}>Hoje</button>
+        <button type="button" className="cal-nav-btn" onClick={() => setWeekStart(w => addDays(w, 7))} title="Próxima semana">›</button>
+        <span className="cal-range">{rangeLabel}</span>
+        <div className="date-picker-wrapper">
+          <input type="date" ref={pickerRef} className="hidden-date-picker"
+            onChange={e => {
+              if (!e.target.value) return
+              const [y, m, d] = e.target.value.split('-').map(Number)
+              setWeekStart(startOfWeek(new Date(y, m - 1, d)))
+            }} />
+          <button type="button" className="btn-calendar" title="Ir para a semana de uma data" onClick={() => pickerRef.current?.showPicker()}>📅</button>
+        </div>
+      </div>
+
+      {loading && <p className="loading">Carregando...</p>}
+      {error && <p className="error">{error}</p>}
+
+      {!loading && !error && (
+        <div className="cal-wrap">
+          <div className="cal-grid">
+            <div className="cal-corner" />
+            {weekDays.map((d, i) => (
+              <div key={i} className={`cal-dayhead${sameDay(d, today) ? ' today' : ''}`}>
+                <span className="cal-dow">{WEEKDAYS[d.getDay()]}</span>
+                <span className="cal-dnum">{d.getDate()}</span>
+              </div>
+            ))}
+
+            <div className="cal-times" style={{ height: totalH * HOUR_H }}>
+              {hours.map(h => (
+                <span key={h} className="cal-hour" style={{ top: (h - minH) * HOUR_H }}>
+                  {h === 12 ? '12 PM' : h < 12 ? `${h} AM` : `${h - 12} PM`}
+                </span>
+              ))}
+            </div>
+
+            {weekDays.map((d, i) => {
+              const dayEvents = layoutDay(appts.filter(a => sameDay(a.start, d)))
               return (
-                <button
-                  key={opt.value}
-                  onClick={() => setFilterStatus(active ? '' : String(opt.value))}
-                  style={{
-                    padding: '3px 12px', borderRadius: 12, fontSize: '0.78rem', fontWeight: 600,
-                    cursor: 'pointer',
-                    background: active ? color : '#2a2d3a',
-                    color: active ? '#fff' : '#9ca3af',
-                    border: active ? `2px solid ${color}` : '2px solid transparent',
-                    opacity: active ? 1 : 0.75,
-                    transition: 'all 0.15s',
-                  }}
-                >{opt.label}</button>
+                <div
+                  key={i}
+                  className={`cal-day${d.getDay() === 0 ? ' weekend' : ''}${sameDay(d, today) ? ' today' : ''}`}
+                  style={{ height: totalH * HOUR_H, '--hh': `${HOUR_H}px` }}
+                  onClick={e => newAtSlot(e, d)}
+                >
+                  {dayEvents.map(ev => {
+                    const color = STATUS_COLORS[ev.item.status] ?? '#6b7280'
+                    const top = ((ev.sMin - minH * 60) / 60) * HOUR_H
+                    const height = Math.max(((ev.eMin - ev.sMin) / 60) * HOUR_H - 2, 22)
+                    return (
+                      <div
+                        key={ev.item.id_service_appointment}
+                        className="cal-card"
+                        style={{
+                          top, height,
+                          left: `calc(${(ev.col / ev.cols) * 100}% + 2px)`,
+                          width: `calc(${100 / ev.cols}% - 4px)`,
+                          background: color + '2b',
+                          borderLeft: `3px solid ${color}`,
+                          color,
+                        }}
+                        onMouseEnter={e => showTooltip(e, ev)}
+                        onMouseLeave={() => setTooltip(null)}
+                        onClick={e => { e.stopPropagation(); setTooltip(null); setSelected(ev.item) }}
+                      >
+                        <span className="cal-card-time">{fmtHM(ev.start)}-{fmtHM(ev.end)}</span>
+                        <strong className="cal-card-name">{ev.item.customer_name ?? '—'}</strong>
+                        <span className="cal-card-sub">{[ev.item.model_name, ev.item.plate_number].filter(Boolean).join(' · ')}</span>
+                      </div>
+                    )
+                  })}
+                </div>
               )
             })}
           </div>
-          {/* Date range filters */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ color: '#aaa', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>De</span>
-          <div className="date-picker-wrapper">
-            <input
-              type="text" value={fromDisplay} placeholder="dd/mm/aaaa" maxLength={10}
-              className="crud-search" style={{ width: '120px' }}
-              onChange={e => setFromDisplay(maskDate(e.target.value))}
-            />
-            <input type="date" ref={fromPickerRef} className="hidden-date-picker"
-              onChange={e => { const [y,m,d] = e.target.value.split('-'); setFromDisplay(`${d}/${m}/${y}`) }} />
-            <button type="button" className="btn-calendar" onClick={() => fromPickerRef.current?.showPicker()}>📅</button>
-          </div>
-          <span style={{ color: '#aaa', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>Até</span>
-          <div className="date-picker-wrapper">
-            <input
-              type="text" value={toDisplay} placeholder="dd/mm/aaaa" maxLength={10}
-              className="crud-search" style={{ width: '120px' }}
-              onChange={e => setToDisplay(maskDate(e.target.value))}
-            />
-            <input type="date" ref={toPickerRef} className="hidden-date-picker"
-              onChange={e => { const [y,m,d] = e.target.value.split('-'); setToDisplay(`${d}/${m}/${y}`) }} />
-            <button type="button" className="btn-calendar" onClick={() => toPickerRef.current?.showPicker()}>📅</button>
-          </div>
-          {hasFilter && (
-            <button
-              type="button"
-              onClick={() => { setFilterStatus(''); setFromDisplay(''); setToDisplay('') }}
-              style={{ padding: '5px 10px', fontSize: '0.8rem', cursor: 'pointer', border: '1px solid #555', borderRadius: 4, background: '#1a1a1a', color: '#aaa' }}
-            >
-              Limpar
-            </button>
-          )}
-          </div>
         </div>
-      }
-    />
+      )}
+
+      {!loading && !error && appts.length === 0 && (
+        <p className="crud-counter" style={{ marginTop: 12 }}>Nenhum agendamento nesta semana.</p>
+      )}
+
+      {tooltip && createPortal(
+        <div
+          className="cal-tooltip"
+          style={{ top: tooltip.y, left: tooltip.x, transform: tooltip.flip ? 'translateX(-100%)' : 'none' }}
+        >
+          <strong>{tooltip.a.item.customer_name ?? '—'}</strong>
+          <div>{[tooltip.a.item.model_name, tooltip.a.item.plate_number].filter(Boolean).join(' · ') || '—'}</div>
+          <div>{fmtHM(tooltip.a.start)}-{fmtHM(tooltip.a.end)} · {STATUS_LABELS[tooltip.a.item.status] ?? ''}</div>
+          {tooltip.a.item.notes && <div>{tooltip.a.item.notes}</div>}
+        </div>,
+        document.body
+      )}
+
+      {selected && createPortal(
+        <div className="form-modal-overlay" onClick={() => setSelected(null)}>
+          <div className="form-modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div className="form-modal-header">
+              <span>Agendamento #{selected.id_service_appointment}</span>
+              <button className="modal-close" type="button" onClick={() => setSelected(null)}>✕</button>
+            </div>
+            <div className="crud-form" style={{ gap: 8 }}>
+              <div><strong>Cliente:</strong> {selected.customer_name ?? '—'}</div>
+              <div><strong>Veículo:</strong> {[selected.model_name, selected.plate_number].filter(Boolean).join(' · ') || '—'}</div>
+              <div><strong>Início:</strong> {fmtDatetimeBR(selected.start_at)}</div>
+              <div><strong>Fim:</strong> {fmtDatetimeBR(selected.end_at) || '—'}</div>
+              <div><strong>Status:</strong> <StatusBadge status={selected.status} /></div>
+              {selected.notes && <div><strong>Observações:</strong> {selected.notes}</div>}
+              <div className="form-actions">
+                <button className="btn-edit" type="button" onClick={() => navigate('/appointments/edit', { state: { item: selected } })}>Editar</button>
+                <button className="btn-os" type="button" onClick={() => openOS(selected)}>Abrir OS</button>
+                <button className="btn-delete" type="button" disabled={deleting} onClick={() => handleDelete(selected)}>{deleting ? 'Excluindo...' : 'Excluir'}</button>
+                <button type="button" onClick={() => setSelected(null)}>Fechar</button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
   )
 }

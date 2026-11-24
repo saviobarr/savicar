@@ -12,6 +12,8 @@ import {
   createCostCategory,
   fetchAllServiceOrder,
 } from '../api'
+import { custoNoPeriodo } from '../utils/operationalCosts'
+import { serverNow } from '../serverClock'
 
 const RECURRENCE_LABELS = {
   1: 'Diário',
@@ -44,6 +46,12 @@ const FIELDS = [
 ]
 
 const CATEGORY_TYPES = { 1: 'Fixo', 2: 'Variável' }
+
+function todayISO() {
+  const d = serverNow()
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
 
 function NewCategoryModal({ onSaved, onClose }) {
   const [form, setForm] = useState({ name: '', type: '', description: '' })
@@ -244,7 +252,7 @@ export function OperationalCostForm({ initialData, onSaved, onCancel }) {
     description: initialData?.description ?? '',
     amount: initialData?.amount ?? '',
     recurrence: initialData?.recurrence ?? '',
-    reference_date: initialData?.reference_date ?? '',
+    reference_date: initialData?.reference_date ?? (isEdit ? '' : todayISO()),
     due_day: initialData?.due_day ?? '',
     id_order: initialData?.id_order ?? '',
   })
@@ -397,6 +405,7 @@ export function OperationalCostForm({ initialData, onSaved, onCancel }) {
                 name="reference_date"
                 value={form.reference_date ?? ''}
                 onChange={handleChange}
+                style={{ width: '160px' }}
               />
             </>
           )}
@@ -506,42 +515,6 @@ function isoToBRShort(iso) {
   return `${d}/${m}/${y}`
 }
 
-// Verifica se um custo recorrente possui alguma ocorrência dentro do período [start, end]
-// start e end são strings "YYYY-MM-DD"
-function recurrenteNoPeriodo(item, start, end) {
-  const recurrence = Number(item.recurrence)
-  const startDate  = new Date(start + 'T00:00:00')
-  const endDate    = new Date(end   + 'T00:00:00')
-
-  if (recurrence === 30) {
-    // Mensal com due_day: verifica se o dia de vencimento cai em algum mês do período
-    const dueDay = item.due_day
-    if (!dueDay) return true
-    let cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
-    while (cur <= endDate) {
-      const daysInMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate()
-      const actualDay   = Math.min(dueDay, daysInMonth)
-      const occurrence  = new Date(cur.getFullYear(), cur.getMonth(), actualDay)
-      if (occurrence >= startDate && occurrence <= endDate) return true
-      cur.setMonth(cur.getMonth() + 1)
-    }
-    return false
-  }
-
-  if (recurrence === 1) return true // diário: sempre ocorre
-
-  // Para recorrências com intervalo fixo, usa reference_date como ponto de partida
-  if (!item.reference_date) return true
-  const refDate = new Date(item.reference_date.substring(0, 10) + 'T00:00:00')
-
-  // Calcula quantos intervalos são necessários para atingir ou passar o início do período
-  const msPerDay  = 86400000
-  const diffDays  = Math.ceil((startDate - refDate) / msPerDay)
-  const startN    = diffDays > 0 ? Math.ceil(diffDays / recurrence) : 0
-  const firstHit  = new Date(refDate.getTime() + startN * recurrence * msPerDay)
-  return firstHit <= endDate
-}
-
 export default function OperationalCostsPage() {
   const navigate = useNavigate()
   const [items, setItems] = useState([])
@@ -551,7 +524,7 @@ export default function OperationalCostsPage() {
   const [deleting, setDeleting] = useState(false)
 
   // Filtro de período — mês atual como padrão
-  const today   = new Date()
+  const today   = serverNow()
   const yyyy    = today.getFullYear()
   const mm      = String(today.getMonth() + 1).padStart(2, '0')
   const lastDay = new Date(yyyy, today.getMonth() + 1, 0).getDate()
@@ -604,7 +577,7 @@ export default function OperationalCostsPage() {
   const allEventuais   = items.filter(c => c.recurrence == null || Number(c.recurrence) === 0)
 
   const recorrentes = (filterStart && filterEnd)
-    ? allRecorrentes.filter(c => recurrenteNoPeriodo(c, filterStart, filterEnd))
+    ? allRecorrentes.filter(c => custoNoPeriodo(c, filterStart, filterEnd))
     : allRecorrentes
 
   const eventuais = (filterStart && filterEnd)

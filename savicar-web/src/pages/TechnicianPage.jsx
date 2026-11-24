@@ -67,6 +67,7 @@ export function TechnicianForm({ initialData, onSaved, onCancel }) {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    e.stopPropagation()
     setSaving(true)
     setError(null)
     try {
@@ -78,10 +79,11 @@ export function TechnicianForm({ initialData, onSaved, onCancel }) {
       }
       if (isEdit) {
         await updateTechnician(initialData.id_technician, payload)
+        onSaved()
       } else {
-        await createTechnician(payload)
+        const created = await createTechnician(payload)
+        onSaved(created)
       }
-      onSaved()
     } catch (err) {
       setError(err.message)
     } finally {

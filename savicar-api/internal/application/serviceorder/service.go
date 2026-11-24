@@ -7,18 +7,29 @@ import (
 	"savicar-api/internal/domain/inventory"
 	"savicar-api/internal/domain/serviceorder"
 	"savicar-api/internal/domain/serviceorderproducts"
+	"savicar-api/internal/domain/user"
 )
 
 const statusOrcamento = 0
 
-type Service struct {
-	repo     serviceorder.Repository
-	products serviceorderproducts.Repository
-	inventory inventory.Repository
+// Actor identifies who is calling Update, taken from the JWT claims in the
+// request context — used to decide whether admins should be notified.
+type Actor struct {
+	UserID   int
+	UserName string
+	Profile  int
+	IDTenant int
 }
 
-func NewService(repo serviceorder.Repository, products serviceorderproducts.Repository, inv inventory.Repository) *Service {
-	return &Service{repo: repo, products: products, inventory: inv}
+type Service struct {
+	repo      serviceorder.Repository
+	products  serviceorderproducts.Repository
+	inventory inventory.Repository
+	notifier  serviceorder.Notifier
+}
+
+func NewService(repo serviceorder.Repository, products serviceorderproducts.Repository, inv inventory.Repository, notifier serviceorder.Notifier) *Service {
+	return &Service{repo: repo, products: products, inventory: inv, notifier: notifier}
 }
 
 func (s *Service) GetAll(ctx context.Context) ([]serviceorder.ServiceOrder, error) {
@@ -36,11 +47,25 @@ func (s *Service) GetByID(ctx context.Context, id int) (*serviceorder.ServiceOrd
 	return so, nil
 }
 
+// Create inserts a new service order. When so.ClientUUID is set (offline
+// clients generate one before syncing), a retried sync after a lost response
+// must not create a duplicate order — so an existing row with that
+// ClientUUID is returned as-is instead of inserting again.
 func (s *Service) Create(ctx context.Context, so *serviceorder.ServiceOrder) error {
+	if so.ClientUUID != nil && *so.ClientUUID != "" {
+		existing, err := s.repo.FindByClientUUID(ctx, *so.ClientUUID)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			*so = *existing
+			return nil
+		}
+	}
 	return s.repo.Create(ctx, so)
 }
 
-func (s *Service) Update(ctx context.Context, so *serviceorder.ServiceOrder) error {
+func (s *Service) Update(ctx context.Context, so *serviceorder.ServiceOrder, actor Actor) error {
 	old, err := s.repo.FindByID(ctx, so.IDOrder)
 	if err != nil {
 		return err
@@ -60,6 +85,14 @@ func (s *Service) Update(ctx context.Context, so *serviceorder.ServiceOrder) err
 				}
 			}
 		}
+	}
+	if s.notifier != nil && actor.Profile == int(user.ProfileTechnician) {
+		name := actor.UserName
+		if name == "" {
+			name = "Um mecânico"
+		}
+		msg := fmt.Sprintf("%s atualizou a OS #%d", name, so.IDOrder)
+		_ = s.notifier.NotifyAdmins(ctx, actor.IDTenant, so.IDOrder, msg)
 	}
 	return nil
 }

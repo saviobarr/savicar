@@ -68,6 +68,7 @@ export default function ResourcePage() {
       FormComponent={ResourceForm}
       filterKeys={['description']}
       filterPlaceholder="Filtrar por descrição..."
+      persistSearch={false}
       basePath="/resources"
     />
   )

@@ -1,4 +1,4 @@
-﻿package persistence
+package persistence
 
 import (
 	"context"
@@ -31,13 +31,13 @@ func (r *FinancialReportRepository) FindByPeriod(ctx context.Context, dateFrom, 
 				WHERE s.ID_ORDER = so.ID_ORDER
 			), 0) AS service_income,
 			COALESCE((
-				SELECT SUM(sop.QUANTITY * inv.SALES_PRICE)
+				SELECT SUM(sop.QUANTITY * COALESCE(sop.SALES_PRICE, inv.SALES_PRICE))
 				FROM SERVICE_ORDER_PRODUCTS sop
 				JOIN INVENTORY inv ON inv.ID_PRODUCT = sop.ID_PRODUCT
 				WHERE sop.ID_ORDER = so.ID_ORDER
 			), 0) AS product_income,
 			COALESCE((
-				SELECT SUM(sop.QUANTITY * inv.COST_PRICE)
+				SELECT SUM(sop.QUANTITY * COALESCE(sop.COST_PRICE, inv.COST_PRICE))
 				FROM SERVICE_ORDER_PRODUCTS sop
 				JOIN INVENTORY inv ON inv.ID_PRODUCT = sop.ID_PRODUCT
 				WHERE sop.ID_ORDER = so.ID_ORDER
@@ -48,7 +48,8 @@ func (r *FinancialReportRepository) FindByPeriod(ctx context.Context, dateFrom, 
 				LEFT JOIN TECHNICIAN t ON t.ID_TECHNICIAN = s.ID_TECHNICIAN
 				WHERE s.ID_ORDER = so.ID_ORDER
 			), 0) AS technician_cost,
-			COALESCE(so.DISCOUNT, 0) AS discount
+			COALESCE(so.DISCOUNT, 0) AS discount,
+			so.STATUS
 		FROM SERVICE_ORDER so
 		LEFT JOIN CUSTOMER c ON c.ID_CUSTOMER = so.ID_CUSTOMER
 		WHERE DATE(so.DATE_TIME_IN) BETWEEN ? AND ?
@@ -72,6 +73,7 @@ func (r *FinancialReportRepository) FindByPeriod(ctx context.Context, dateFrom, 
 			&o.IDOrder, &o.CustomerName,
 			&o.ServiceIncome, &o.ProductIncome,
 			&o.ProductCost, &o.TechnicianCost, &o.Discount,
+			&o.Status,
 		); err != nil {
 			return nil, err
 		}
@@ -80,8 +82,15 @@ func (r *FinancialReportRepository) FindByPeriod(ctx context.Context, dateFrom, 
 		o.TotalCost = o.ProductCost + o.TechnicianCost + o.Discount
 		o.Result = o.TotalIncome - o.TotalCost
 
-		report.TotalIncome += o.TotalIncome
-		report.TotalCost += o.TotalCost
+		// Status 0 = "Orçamento" — not confirmed work yet, so it's kept out of
+		// TotalIncome/TotalCost (and therefore out of Result) entirely, and its
+		// revenue is reported separately as BudgetIncome instead.
+		if o.Status == 0 {
+			report.BudgetIncome += o.TotalIncome
+		} else {
+			report.TotalIncome += o.TotalIncome
+			report.TotalCost += o.TotalCost
+		}
 		report.Orders = append(report.Orders, o)
 	}
 	if err := rows.Err(); err != nil {
@@ -122,4 +131,3 @@ func (r *FinancialReportRepository) FindByPeriod(ctx context.Context, dateFrom, 
 	report.Result = report.TotalIncome - report.TotalCost
 	return report, nil
 }
-

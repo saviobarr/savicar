@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { fetchAllPayments, fetchAllServiceOrder, fetchAllPaymentMethod, updatePayment } from '../api'
+import { serverNow, serverTodayISO, localISODate } from '../serverClock'
 
 const PAGE_SIZE = 10
 
@@ -143,11 +144,11 @@ export default function RelatorioPagamentosPage() {
   const [saveError, setSaveError] = useState(null)
   const [view, setView] = useState('resumo') // 'resumo' | 'detalhes'
 
-  const defaultDateTo = new Date().toISOString().slice(0, 10)
+  const defaultDateTo = serverTodayISO()
   const defaultDateFrom = (() => {
-    const d = new Date()
+    const d = serverNow()
     d.setMonth(d.getMonth() - 1)
-    return d.toISOString().slice(0, 10)
+    return localISODate(d)
   })()
   const [filterDateFrom, setFilterDateFrom] = useState(defaultDateFrom)
   const [filterDateTo, setFilterDateTo] = useState(defaultDateTo)
@@ -169,7 +170,7 @@ export default function RelatorioPagamentosPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = serverTodayISO()
 
   const filtered = payments.filter(p => {
     if (filterOS && !String(p.id_order ?? '').includes(filterOS.trim())) return false
@@ -282,7 +283,7 @@ export default function RelatorioPagamentosPage() {
               borderBottom: view === v ? '2px solid #e60000' : '2px solid transparent',
               marginBottom: '-2px',
               color: view === v ? '#fff' : '#64748b',
-              fontWeight: view === v ? 700 : 400,
+              fontWeight: 700,
               fontSize: '0.9rem',
               cursor: 'pointer',
               textTransform: 'capitalize',

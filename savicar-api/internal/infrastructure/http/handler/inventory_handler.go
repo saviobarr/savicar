@@ -1,6 +1,7 @@
 ﻿package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -96,6 +97,10 @@ func (h *InventoryHandler) getExternalLookup(c *gin.Context) {
 	code := c.Param("code")
 	product, err := h.svc.LookupExternal(c.Request.Context(), code)
 	if err != nil {
+		if errors.Is(err, inventory.ErrLookupQuotaExceeded) {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error(), "code": "lookup_quota_exceeded"})
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}

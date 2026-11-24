@@ -8,27 +8,34 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	appcustomermodel "savicar-api/internal/application/customermodel"
 )
 
-// VehicleLookupHandler proxies plate lookups to the wdapi2.com.br service,
-// keeping the paid API key server-side instead of embedding it in the
+// VehicleLookupHandler resolves a plate to vehicle data, checking our own
+// records first (customerModelSvc.FindByPlate — free, and the vehicle may
+// already be registered) before falling back to the paid wdapi2.com.br
+// service, keeping that API key server-side instead of embedding it in the
 // Android app (where it could be extracted from the APK).
 type VehicleLookupHandler struct {
-	apiKey string
-	log    *slog.Logger
+	customerModelSvc *appcustomermodel.Service
+	apiKey           string
+	log              *slog.Logger
 }
 
-func NewVehicleLookupHandler() *VehicleLookupHandler {
+func NewVehicleLookupHandler(customerModelSvc *appcustomermodel.Service) *VehicleLookupHandler {
 	key := os.Getenv("WDAPI2_KEY")
 	if key == "" {
 		key = "a9f858c55d484b678c997fc1e4ae4349"
 	}
 	return &VehicleLookupHandler{
-		apiKey: key,
-		log:    slog.Default().WithGroup("vehiclelookup"),
+		customerModelSvc: customerModelSvc,
+		apiKey:           key,
+		log:              slog.Default().WithGroup("vehiclelookup"),
 	}
 }
 
@@ -65,7 +72,11 @@ type wdapi2Response struct {
 	MensagemRetorno string      `json:"mensagemRetorno"`
 }
 
-// VehicleLookupResponse is the normalized shape returned to callers (Android app).
+// VehicleLookupResponse is the normalized shape returned to callers (Android
+// app and web frontend). Source tells the caller which path answered: "local"
+// means IDModel is already the exact catalog id (no brand/model text matching
+// needed); "external" means Brand/Model/SubModel are free text from the paid
+// lookup service and still need matching against the make/model catalog.
 type VehicleLookupResponse struct {
 	Plate     string `json:"plate"`
 	Brand     string `json:"brand"`
@@ -76,12 +87,51 @@ type VehicleLookupResponse struct {
 	YearModel string `json:"year_model"`
 	Color     string `json:"color"`
 	Chassis   string `json:"chassis"`
+	Source    string `json:"source"`
+	IDModel   *int   `json:"id_model,omitempty"`
 }
 
 func (h *VehicleLookupHandler) lookup(c *gin.Context) {
 	plate := strings.ToUpper(plateSanitizeRe.ReplaceAllString(c.Param("plate"), ""))
 	if plate == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "placa inválida"})
+		return
+	}
+
+	if cm, err := h.customerModelSvc.FindByPlate(c.Request.Context(), plate); err != nil {
+		h.log.Error("local plate check failed", slog.String("plate", plate), slog.Any("error", err))
+	} else if cm != nil {
+		model := ""
+		if cm.ModelName != nil {
+			model = *cm.ModelName
+		}
+		color := ""
+		if cm.Color != nil {
+			color = *cm.Color
+		}
+		chassis := ""
+		if cm.VIN != nil {
+			chassis = *cm.VIN
+		}
+		yearMake := ""
+		if cm.YearMake != nil {
+			yearMake = strconv.Itoa(*cm.YearMake)
+		}
+		yearModel := ""
+		if cm.YearModel != nil {
+			yearModel = strconv.Itoa(*cm.YearModel)
+		}
+		idModel := cm.IDModel
+		c.JSON(http.StatusOK, VehicleLookupResponse{
+			Plate:     plate,
+			Model:     model,
+			YearMake:  yearMake,
+			YearModel: yearModel,
+			Color:     color,
+			Chassis:   chassis,
+			Source:    "local",
+			IDModel:   &idModel,
+		})
 		return
 	}
 
@@ -143,5 +193,6 @@ func (h *VehicleLookupHandler) lookup(c *gin.Context) {
 		YearModel: parsed.AnoModelo,
 		Color:     parsed.Cor,
 		Chassis:   chassis,
+		Source:    "external",
 	})
 }

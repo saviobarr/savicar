@@ -6,23 +6,27 @@ type TechnicianCostItem struct {
 }
 
 type OrderResult struct {
-	IDOrder              int                  `json:"id_order"`
-	CustomerName         string               `json:"customer_name"`
-	ServiceIncome        float64              `json:"service_income"`
-	ProductIncome        float64              `json:"product_income"`
-	ProductCost          float64              `json:"product_cost"`
-	TechnicianCost       float64              `json:"technician_cost"`
-	Discount             float64              `json:"discount"`
-	TechnicianBreakdown  []TechnicianCostItem `json:"technician_breakdown"`
-	TotalIncome          float64              `json:"total_income"`
-	TotalCost            float64              `json:"total_cost"`
-	Result               float64              `json:"result"`
+	IDOrder             int                  `json:"id_order"`
+	Status              int                  `json:"status"`
+	CustomerName        string               `json:"customer_name"`
+	ServiceIncome       float64              `json:"service_income"`
+	ProductIncome       float64              `json:"product_income"`
+	ProductCost         float64              `json:"product_cost"`
+	TechnicianCost      float64              `json:"technician_cost"`
+	Discount            float64              `json:"discount"`
+	TechnicianBreakdown []TechnicianCostItem `json:"technician_breakdown"`
+	TotalIncome         float64              `json:"total_income"`
+	TotalCost           float64              `json:"total_cost"`
+	Result              float64              `json:"result"`
 }
 
 type DailyReport struct {
 	Date        string        `json:"date"`
 	Orders      []OrderResult `json:"orders"`
 	TotalIncome float64       `json:"total_income"`
-	TotalCost   float64       `json:"total_cost"`
-	Result      float64       `json:"result"`
+	// BudgetIncome sums TotalIncome for orders still in "Orçamento" (status 0),
+	// kept out of TotalIncome since a quote isn't confirmed revenue yet.
+	BudgetIncome float64 `json:"budget_income"`
+	TotalCost    float64 `json:"total_cost"`
+	Result       float64 `json:"result"`
 }

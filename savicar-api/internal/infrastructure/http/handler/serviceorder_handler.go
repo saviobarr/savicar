@@ -108,7 +108,13 @@ func (h *ServiceOrderHandler) update(c *gin.Context) {
 		return
 	}
 	item.IDOrder = id
-	if err := h.svc.Update(c.Request.Context(), &item); err != nil {
+	actor := serviceordersvc.Actor{
+		UserID:   contextInt(c, "user_id"),
+		UserName: contextString(c, "user_name"),
+		Profile:  contextInt(c, "profile"),
+		IDTenant: contextInt(c, "id_tenant"),
+	}
+	if err := h.svc.Update(c.Request.Context(), &item, actor); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

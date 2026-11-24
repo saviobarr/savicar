@@ -79,7 +79,13 @@ func (h *ServicesHandler) create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	if err := h.svc.Create(c.Request.Context(), &item); err != nil {
+	actor := servicessvc.Actor{
+		UserID:   contextInt(c, "user_id"),
+		UserName: contextString(c, "user_name"),
+		Profile:  contextInt(c, "profile"),
+		IDTenant: contextInt(c, "id_tenant"),
+	}
+	if err := h.svc.Create(c.Request.Context(), &item, actor); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

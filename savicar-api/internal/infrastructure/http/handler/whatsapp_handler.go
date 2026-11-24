@@ -7,8 +7,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	_ "image/gif"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,8 +27,10 @@ import (
 	appcity "savicar-api/internal/application/city"
 	apppayment "savicar-api/internal/application/payment"
 	appserviceorder "savicar-api/internal/application/serviceorder"
+	appserviceorderimage "savicar-api/internal/application/serviceorderimage"
 	appstate "savicar-api/internal/application/state"
 	apptenant "savicar-api/internal/application/tenantconfig"
+	"savicar-api/internal/infrastructure/httpcurl"
 )
 
 var osStatusLabels = map[int]string{
@@ -39,6 +47,7 @@ type WhatsAppHandler struct {
 	paymentSvc   *apppayment.Service
 	citySvc      *appcity.Service
 	stateSvc     *appstate.Service
+	imageSvc     *appserviceorderimage.Service
 	db           *sql.DB
 	evolutionURL string
 	evolutionKey string
@@ -51,6 +60,7 @@ func NewWhatsAppHandler(
 	paymentSvc *apppayment.Service,
 	citySvc *appcity.Service,
 	stateSvc *appstate.Service,
+	imageSvc *appserviceorderimage.Service,
 	db *sql.DB,
 ) *WhatsAppHandler {
 	url := os.Getenv("EVOLUTION_API_URL")
@@ -67,6 +77,7 @@ func NewWhatsAppHandler(
 		paymentSvc:   paymentSvc,
 		citySvc:      citySvc,
 		stateSvc:     stateSvc,
+		imageSvc:     imageSvc,
 		db:           db,
 		evolutionURL: url,
 		evolutionKey: key,
@@ -74,7 +85,17 @@ func NewWhatsAppHandler(
 	}
 }
 
-func (h *WhatsAppHandler) evolutionDo(req *http.Request) (*http.Response, []byte, error) {
+// evolutionDo is the single choke point every Evolution API call in this
+// handler goes through — create-instance, status, sendOrder, disconnect —
+// so logging a transport failure or a >=400 response at Error here (instead
+// of the Info it used to be, which never triggered anything) is what makes
+// a failed "enviar OS por WhatsApp" — or any other Evolution call — turn
+// into a support WhatsApp alert via erroralert.Handler. The curl mirrors
+// what actually went out, apikey redacted; the request body reused from the
+// info log already redacts the base64 media payload on sendMedia calls.
+// extra lets a caller attach business context (e.g. order_id/cliente on
+// sendOrder) to whichever log line ends up firing.
+func (h *WhatsAppHandler) evolutionDo(req *http.Request, extra ...any) (*http.Response, []byte, error) {
 	var payload string
 	if req.Body != nil {
 		bodyBytes, _ := io.ReadAll(req.Body)
@@ -85,30 +106,126 @@ func (h *WhatsAppHandler) evolutionDo(req *http.Request) (*http.Response, []byte
 			payload = "<binary omitted>"
 		}
 	}
-	h.log.Info("evolution api request",
+	h.log.Info("evolution api request", append([]any{
 		slog.String("method", req.Method),
 		slog.String("url", req.URL.String()),
 		slog.String("payload", payload),
-	)
+	}, extra...)...)
+	curl := httpcurl.Command(req.Method, req.URL.String(),
+		[]httpcurl.Header{{Key: "apikey", Value: "***redacted***"}}, []byte(payload))
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		h.log.Error("evolution api error",
+		h.log.Error("evolution api error", append([]any{
 			slog.String("method", req.Method),
 			slog.String("url", req.URL.String()),
 			slog.Any("error", err),
-		)
+			slog.String("curl", curl),
+		}, extra...)...)
 		return nil, nil, err
 	}
 	raw, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	h.log.Info("evolution api response",
-		slog.String("method", req.Method),
-		slog.String("url", req.URL.String()),
-		slog.Int("status", resp.StatusCode),
-		slog.String("body", string(raw)),
-	)
+	if resp.StatusCode >= 400 {
+		h.log.Error("evolution api rejected request", append([]any{
+			slog.String("method", req.Method),
+			slog.String("url", req.URL.String()),
+			slog.Int("status", resp.StatusCode),
+			slog.String("body", string(raw)),
+			slog.String("curl", curl),
+		}, extra...)...)
+	} else {
+		h.log.Info("evolution api response",
+			slog.String("method", req.Method),
+			slog.String("url", req.URL.String()),
+			slog.Int("status", resp.StatusCode),
+			slog.String("body", string(raw)),
+		)
+	}
 	resp.Body = io.NopCloser(bytes.NewReader(raw))
 	return resp, raw, nil
+}
+
+// whatsappNumberExists asks the Evolution API whether phone is a real,
+// registered WhatsApp number (POST /chat/whatsappNumbers/{instance}) — used
+// before sendMedia so a bad number surfaces as a clear "invalid_whatsapp_number"
+// instead of an opaque Evolution error (or a silently-undelivered message).
+func (h *WhatsAppHandler) whatsappNumberExists(c *gin.Context, instanceName, phone string) (bool, error) {
+	body, _ := json.Marshal(map[string]any{"numbers": []string{phone}})
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost,
+		h.resolveBaseURL(c)+"/chat/whatsappNumbers/"+instanceName, bytes.NewReader(body))
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("apikey", h.evolutionKey)
+
+	resp, raw, err := h.evolutionDo(req, slog.String("telefone", phone))
+	if err != nil {
+		return false, err
+	}
+	if resp.StatusCode >= 400 {
+		return false, fmt.Errorf("evolution api rejected whatsappNumbers check (HTTP %d)", resp.StatusCode)
+	}
+
+	var results []struct {
+		Exists bool `json:"exists"`
+	}
+	if err := json.Unmarshal(raw, &results); err != nil || len(results) == 0 {
+		return false, fmt.Errorf("invalid response from evolution api")
+	}
+	return results[0].Exists, nil
+}
+
+// instanceState returns the Evolution connection state of the instance
+// ("open" when WhatsApp is connected, "close"/"connecting" otherwise).
+func (h *WhatsAppHandler) instanceState(c *gin.Context, name string) (string, error) {
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet,
+		h.resolveBaseURL(c)+"/instance/connectionState/"+name, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("apikey", h.evolutionKey)
+	resp, raw, err := h.evolutionDo(req)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("evolution api rejected connectionState check (HTTP %d)", resp.StatusCode)
+	}
+	var result struct {
+		Instance struct {
+			State string `json:"state"`
+		} `json:"instance"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", err
+	}
+	return result.Instance.State, nil
+}
+
+const whatsappDisconnectedMsg = "O WhatsApp da empresa está desconectado. Reconecte em Configurar WhatsApp (leia o QR Code novamente) e tente enviar de novo."
+
+// ensureConnected answers 409 whatsapp_disconnected and returns false when the
+// instance isn't connected — sending then would only surface Evolution's
+// opaque socket error (e.g. "Cannot read properties of undefined (reading
+// 'waUploadToServer')", raised when the Baileys session isn't up). If the
+// state itself can't be read, it lets the send attempt report the real problem.
+func (h *WhatsAppHandler) ensureConnected(c *gin.Context, instanceName string, extra ...any) bool {
+	state, err := h.instanceState(c, instanceName)
+	if err != nil || state == "open" {
+		return true
+	}
+	h.log.ErrorContext(c.Request.Context(), "whatsapp instance not connected",
+		append([]any{slog.String("instance", instanceName), slog.String("state", state)}, extra...)...)
+	c.JSON(http.StatusConflict, gin.H{"error": "whatsapp_disconnected", "message": whatsappDisconnectedMsg})
+	return false
+}
+
+// isSocketNotReady recognises Evolution's response when the instance reports
+// as connected but its WhatsApp socket is gone/not ready.
+func isSocketNotReady(raw []byte) bool {
+	return bytes.Contains(raw, []byte("waUploadToServer"))
 }
 
 func (h *WhatsAppHandler) RegisterRoutes(r gin.IRouter) {
@@ -117,6 +234,7 @@ func (h *WhatsAppHandler) RegisterRoutes(r gin.IRouter) {
 	g.GET("/status", h.status)
 	g.POST("/confirm", h.confirm)
 	g.POST("/send-order", h.sendOrder)
+	g.POST("/send-images", h.sendImages)
 	g.DELETE("/disconnect", h.disconnect)
 }
 
@@ -261,6 +379,7 @@ type osData struct {
 	DateTimeOut     string
 	OdometerReading string
 	CustomerNotes   string
+	Remarks         string
 	DiagnosisNotes  string
 	InternalNotes   string
 	TotalAmount     float64
@@ -332,6 +451,7 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 		DateTimeIn:     derefStr(order.DateTimeIn),
 		DateTimeOut:    derefStr(order.DateTimeOut),
 		CustomerNotes:  derefStr(order.CustomerNotes),
+		Remarks:        derefStr(order.Remarks),
 		DiagnosisNotes: derefStr(order.DiagnosisNotes),
 		InternalNotes:  derefStr(order.InternalNotes),
 		TotalAmount:    derefFloat(order.TotalAmount),
@@ -353,10 +473,11 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 	// ── 2. Fetch products ─────────────────────────────────────
 	var products []osProduct
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT COALESCE(i.NAME, ''), COALESCE(sop.QUANTITY, 0), COALESCE(i.SALES_PRICE, 0)
+		SELECT COALESCE(i.NAME, ''), COALESCE(sop.QUANTITY, 0), COALESCE(sop.SALES_PRICE, i.SALES_PRICE, 0)
 		FROM SERVICE_ORDER_PRODUCTS sop
 		LEFT JOIN INVENTORY i ON i.ID_PRODUCT = sop.ID_PRODUCT
 		WHERE sop.ID_ORDER = ?`, body.OrderID)
+	productsOK := err == nil
 	if err != nil {
 		h.log.Error("fetch products failed", slog.Int("order_id", body.OrderID), slog.Any("error", err))
 	} else {
@@ -364,8 +485,13 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 			var p osProduct
 			if err := rows.Scan(&p.Name, &p.Quantity, &p.Price); err != nil {
 				h.log.Error("scan product failed", slog.Any("error", err))
+				productsOK = false
 			}
 			products = append(products, p)
+		}
+		if err := rows.Err(); err != nil {
+			h.log.Error("iterate products failed", slog.Int("order_id", body.OrderID), slog.Any("error", err))
+			productsOK = false
 		}
 		rows.Close()
 	}
@@ -377,6 +503,7 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 		FROM SERVICES s
 		LEFT JOIN TECHNICIAN t ON t.ID_TECHNICIAN = s.ID_TECHNICIAN
 		WHERE s.ID_ORDER = ?`, body.OrderID)
+	servicesOK := err == nil
 	if err != nil {
 		h.log.Error("fetch services failed", slog.Int("order_id", body.OrderID), slog.Any("error", err))
 	} else {
@@ -384,11 +511,34 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 			var s osService
 			if err := srows.Scan(&s.Description, &s.Hours, &s.UnitValue, &s.Total, &s.Technician, &s.Status); err != nil {
 				h.log.Error("scan service failed", slog.Any("error", err))
+				servicesOK = false
 			}
 			s.Technician = strings.TrimSpace(s.Technician)
 			services = append(services, s)
 		}
+		if err := srows.Err(); err != nil {
+			h.log.Error("iterate services failed", slog.Int("order_id", body.OrderID), slog.Any("error", err))
+			servicesOK = false
+		}
 		srows.Close()
+	}
+
+	// The stored TOTAL_AMOUNT can be stale (line items edited after the last save of
+	// the order header). The order screen always recomputes the totals from the
+	// line items, so do the same here to keep the PDF consistent with the system.
+	// Services with status 6 (not approved) are not charged.
+	if productsOK && servicesOK {
+		computed := 0.0
+		for _, s := range services {
+			if s.Status != 6 {
+				computed += s.Total
+			}
+		}
+		for _, p := range products {
+			computed += p.Quantity * p.Price
+		}
+		data.TotalAmount = computed
+		data.FinalAmount = computed - data.Discount
 	}
 
 	// ── 4. Fetch payments ──────────────────────────────────────
@@ -423,19 +573,61 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 	}
 	phone = sanitizePhone(phone)
 
-	// ── 7. Generate PDF ───────────────────────────────────────
-	pdfBytes, err := buildOSPDF(data, products, services, payments, tenant)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate PDF: " + err.Error()})
-		return
-	}
-
-	// ── 8. Send via Evolution API ─────────────────────────────
 	instanceName, err := h.getInstanceName(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	if !h.ensureConnected(c, instanceName, slog.Int("order_id", body.OrderID)) {
+		return
+	}
+
+	// ── 6b. Validate the number is a real WhatsApp account before doing any
+	// of the (comparatively expensive) PDF work — a wrong/inactive number
+	// otherwise only surfaced as an opaque Evolution error from sendMedia.
+	if exists, err := h.whatsappNumberExists(c, instanceName, phone); err != nil {
+		h.log.ErrorContext(ctx, "failed to validate whatsapp number", slog.Int("order_id", body.OrderID), slog.String("telefone", phone), slog.Any("error", err))
+		// The check itself failing doesn't mean the number is bad — fall
+		// through and let the actual send attempt surface any real problem.
+	} else if !exists {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_whatsapp_number", "message": fmt.Sprintf("O número %s informado não é um WhatsApp válido. Verifique o número e tente novamente.", phone)})
+		return
+	}
+
+	// ── 6c. Order photos, appended at the end of the PDF ──────────────
+	var photos [][]byte
+	if orderImages, err := h.imageSvc.GetByOrderID(ctx, body.OrderID); err != nil {
+		h.log.ErrorContext(ctx, "fetch order images failed", slog.Int("order_id", body.OrderID), slog.Any("error", err))
+	} else {
+		for _, img := range orderImages {
+			if img.ImagePath == nil || *img.ImagePath == "" {
+				continue
+			}
+			raw, err := os.ReadFile(*img.ImagePath)
+			if err != nil {
+				h.log.ErrorContext(ctx, "failed to read order image for PDF", slog.Int("order_id", body.OrderID), slog.Int("image_id", img.IDImage), slog.Any("error", err))
+				continue
+			}
+			jpg, err := prepareJPEGForPDF(raw)
+			if err != nil {
+				h.log.ErrorContext(ctx, "failed to decode order image for PDF", slog.Int("order_id", body.OrderID), slog.Int("image_id", img.IDImage), slog.Any("error", err))
+				continue
+			}
+			photos = append(photos, jpg)
+		}
+	}
+
+	// ── 7. Generate PDF ───────────────────────────────────────
+	pdfBytes, err := buildOSPDF(data, products, services, payments, tenant, photos)
+	if err != nil {
+		h.log.ErrorContext(ctx, "failed to generate OS PDF for whatsapp send",
+			slog.Int("order_id", body.OrderID), slog.Any("error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate PDF: " + err.Error()})
+		return
+	}
+
+	// ── 8. Send via Evolution API ─────────────────────────────
 
 	sendPayload := map[string]any{
 		"number":    phone,
@@ -452,17 +644,155 @@ func (h *WhatsAppHandler) sendOrder(c *gin.Context) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("apikey", h.evolutionKey)
 
-	resp, raw, err := h.evolutionDo(req)
+	resp, raw, err := h.evolutionDo(req,
+		slog.Int("order_id", data.IDOrder),
+		slog.String("cliente", data.CustomerName),
+		slog.String("telefone", phone),
+	)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "evolution api unreachable: " + err.Error()})
 		return
 	}
 	if resp.StatusCode >= 400 {
+		if isSocketNotReady(raw) {
+			c.JSON(http.StatusConflict, gin.H{"error": "whatsapp_disconnected", "message": whatsappDisconnectedMsg})
+			return
+		}
 		c.JSON(http.StatusBadGateway, gin.H{"error": string(raw)})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"sent": true, "phone": phone})
+}
+
+// ── sendImages ────────────────────────────────────────────────────────────
+
+// sendImages sends a selection of already-uploaded service order photos
+// (or videos) to the customer's WhatsApp, one media message per file — used
+// by the OS screen's "Mídia" tab after the user checks a few photos and
+// hits "Enviar por WhatsApp".
+func (h *WhatsAppHandler) sendImages(c *gin.Context) {
+	var body struct {
+		OrderID       int    `json:"order_id"`
+		ImageIDs      []int  `json:"image_ids"`
+		PhoneOverride string `json:"phone_override"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.OrderID == 0 || len(body.ImageIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "order_id and image_ids are required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	order, err := h.orderSvc.GetByID(ctx, body.OrderID)
+	if err != nil || order == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+	customerName := derefStr(order.CustomerName)
+	idCustomer := derefInt(order.IDCustomer)
+
+	var phone string
+	if idCustomer > 0 {
+		phone = h.lookupCustomerPhone(ctx, idCustomer)
+	}
+	if phone == "" && body.PhoneOverride != "" {
+		phone = body.PhoneOverride
+	}
+	if phone == "" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "no_phone", "message": "Cliente não possui número de WhatsApp cadastrado."})
+		return
+	}
+	phone = sanitizePhone(phone)
+
+	instanceName, err := h.getInstanceName(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if !h.ensureConnected(c, instanceName, slog.Int("order_id", body.OrderID)) {
+		return
+	}
+
+	if exists, err := h.whatsappNumberExists(c, instanceName, phone); err != nil {
+		h.log.ErrorContext(ctx, "failed to validate whatsapp number", slog.Int("order_id", body.OrderID), slog.String("telefone", phone), slog.Any("error", err))
+		// The check itself failing doesn't mean the number is bad — fall
+		// through and let the actual send attempts surface any real problem.
+	} else if !exists {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_whatsapp_number", "message": fmt.Sprintf("O número %s informado não é um WhatsApp válido. Verifique o número e tente novamente.", phone)})
+		return
+	}
+
+	sentCount := 0
+	var lastErr string
+	for _, imgID := range body.ImageIDs {
+		img, err := h.imageSvc.GetByID(ctx, imgID)
+		if err != nil || img == nil || img.IDOrder == nil || *img.IDOrder != body.OrderID {
+			h.log.ErrorContext(ctx, "image not found for whatsapp send",
+				slog.Int("order_id", body.OrderID), slog.Int("image_id", imgID), slog.String("cliente", customerName))
+			lastErr = "imagem não encontrada"
+			continue
+		}
+
+		path, mediaType := img.ImagePath, "image"
+		if path == nil {
+			path, mediaType = img.VideoPath, "video"
+		}
+		if path == nil {
+			continue
+		}
+
+		fileBytes, err := os.ReadFile(*path)
+		if err != nil {
+			h.log.ErrorContext(ctx, "failed to read media file for whatsapp send",
+				slog.Int("order_id", body.OrderID), slog.Int("image_id", imgID), slog.String("cliente", customerName), slog.Any("error", err))
+			lastErr = "falha ao ler arquivo"
+			continue
+		}
+
+		mimeType := mime.TypeByExtension(filepath.Ext(*path))
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+
+		sendPayload := map[string]any{
+			"number":    phone,
+			"mediatype": mediaType,
+			"mimetype":  mimeType,
+			"caption":   fmt.Sprintf("OS #%d — %s", body.OrderID, customerName),
+			"media":     base64.StdEncoding.EncodeToString(fileBytes),
+			"fileName":  filepath.Base(*path),
+		}
+		sendBody, _ := json.Marshal(sendPayload)
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+			h.resolveBaseURL(c)+"/message/sendMedia/"+instanceName, bytes.NewReader(sendBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("apikey", h.evolutionKey)
+
+		resp, raw, err := h.evolutionDo(req,
+			slog.Int("order_id", body.OrderID),
+			slog.Int("image_id", imgID),
+			slog.String("cliente", customerName),
+			slog.String("telefone", phone),
+		)
+		if err != nil || resp.StatusCode >= 400 {
+			lastErr = "falha ao enviar uma ou mais fotos"
+			if err == nil && isSocketNotReady(raw) {
+				c.JSON(http.StatusConflict, gin.H{"error": "whatsapp_disconnected", "message": whatsappDisconnectedMsg, "sent": sentCount, "total": len(body.ImageIDs)})
+				return
+			}
+			continue
+		}
+		sentCount++
+	}
+
+	if sentCount == 0 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": lastErr, "sent": 0, "total": len(body.ImageIDs)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"sent": sentCount, "total": len(body.ImageIDs), "phone": phone})
 }
 
 // lookupCustomerPhone prefers a contact explicitly marked as WhatsApp,
@@ -594,6 +924,34 @@ func utf8ToLatin1(s string) string {
 
 func latin(s string) string { return utf8ToLatin1(str(s)) }
 
+// grayscaleLogoPNG decodes a logo image (whatever format it was uploaded as)
+// and re-encodes it as PNG converted to grayscale, preserving the original
+// alpha channel so a transparent-background logo stays transparent (needed
+// for a watermark: only the logo's shape should paint over the page).
+func grayscaleLogoPNG(raw []byte) ([]byte, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("empty logo")
+	}
+	img, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	b := img.Bounds()
+	gray := image.NewNRGBA(b)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			c := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+			lum := uint8((299*uint32(c.R) + 587*uint32(c.G) + 114*uint32(c.B)) / 1000)
+			gray.Set(x, y, color.NRGBA{R: lum, G: lum, B: lum, A: c.A})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, gray); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func fmtBRL(v float64) string {
 	return fmt.Sprintf("R$ %.2f", v)
 }
@@ -629,13 +987,27 @@ func fmtDateOnlyBR(d string) string {
 // buildOSPDF generates the service order PDF in memory, mirroring the sections
 // and totals shown in the frontend's printServiceOrder view (ServiceOrderPage.jsx):
 // tenant header, order info, services, products, payments, totals and signature.
-func buildOSPDF(data osData, products []osProduct, services []osService, payments []osPayment, tenant tenantHeader) ([]byte, error) {
+func buildOSPDF(data osData, products []osProduct, services []osService, payments []osPayment, tenant tenantHeader, photos [][]byte) ([]byte, error) {
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetMargins(15, 15, 15)
 	pdf.AddPage()
 
-	pageW, _ := pdf.GetPageSize()
+	pageW, pageH := pdf.GetPageSize()
 	contentW := pageW - 30 // left+right margins
+
+	// ── Watermark (grayscale tenant logo, centered, low opacity) ────────
+	// Drawn first so every later element (header, tables, text) paints over it.
+	if wmPNG, err := grayscaleLogoPNG(tenant.LogoBytes); err == nil {
+		opt := fpdf.ImageOptions{ImageType: "PNG", ReadDpi: true}
+		info := pdf.RegisterImageOptionsReader("logo-watermark", opt, bytes.NewReader(wmPNG))
+		if info != nil && pdf.Ok() && info.Width() > 0 && info.Height() > 0 {
+			wmW := pageW * 0.65
+			wmH := wmW * info.Height() / info.Width()
+			pdf.SetAlpha(0.10, "Normal")
+			pdf.ImageOptions("logo-watermark", (pageW-wmW)/2, (pageH-wmH)/2, wmW, wmH, false, opt, 0, "")
+			pdf.SetAlpha(1, "Normal")
+		}
+	}
 
 	// ── Tenant header (logo + exhibition name/address/contact) ─────────
 	headerTop := pdf.GetY()
@@ -661,7 +1033,7 @@ func buildOSPDF(data osData, products []osProduct, services []osService, payment
 		pdf.CellFormat(textW, lineH, latin(tenant.ExhibitionName), "", 2, "L", false, 0, "")
 		textLines++
 	}
-	addrCity := joinNonEmpty(" — ", tenant.Address, tenant.CityLine)
+	addrCity := joinNonEmpty(" - ", tenant.Address, tenant.CityLine)
 	if addrCity != "" {
 		pdf.SetFont("Helvetica", "", 9)
 		pdf.SetTextColor(80, 80, 80)
@@ -690,11 +1062,11 @@ func buildOSPDF(data osData, products []osProduct, services []osService, payment
 	// ── Title ────────────────────────────────────────────────
 	title := "Ordem de Servico"
 	if data.Status == 0 {
-		title = "Orcamento"
+		title = "Orçamento"
 	}
 	pdf.SetFont("Helvetica", "B", 16)
 	pdf.SetTextColor(30, 30, 30)
-	pdf.CellFormat(contentW, 9, fmt.Sprintf("%s #%d", title, data.IDOrder), "", 1, "L", false, 0, "")
+	pdf.CellFormat(contentW, 9, latin(fmt.Sprintf("%s #%d", title, data.IDOrder)), "", 1, "L", false, 0, "")
 	pdf.Ln(1)
 
 	// ── Info rows (mirrors the print view's info table: labels sized
@@ -740,6 +1112,7 @@ func buildOSPDF(data osData, products []osProduct, services []osService, payment
 	infoRow("Data/Hora Saida", fmtDateBR(data.DateTimeOut))
 	infoRow("Hodometro (km)", data.OdometerReading)
 	multiRow("Obs. do Cliente", data.CustomerNotes)
+	multiRow("Observações Gerais", data.Remarks)
 	multiRow("Diagnostico", data.DiagnosisNotes)
 	pdf.Ln(3)
 
@@ -753,31 +1126,75 @@ func buildOSPDF(data osData, products []osProduct, services []osService, payment
 		pdf.SetFont("Helvetica", "", 10)
 	}
 
+	// ── Shared item-table row renderer ──────────────────────────
+	// Wraps the first column's text instead of letting it overflow into the
+	// numeric columns (CellFormat alone doesn't wrap or clip long text).
+	const itemLineH = 6.0
+	descW := contentW * 0.5
+	col2W := contentW * 0.15
+	col3W := contentW * 0.175
+	col4W := contentW * 0.175
+	// wrapLatin1 mimics fpdf's own word-wrap width calculation, but works on
+	// text already Latin-1-encoded by latin() — unlike pdf.SplitText/SplitLines,
+	// which always decode the string as UTF-8 runes and panic (or mangle)
+	// on the raw high-byte characters (á, ç, é, ...) that latin() produces.
+	wrapLatin1 := func(text string, maxW float64) []string {
+		words := strings.Fields(text)
+		if len(words) == 0 {
+			return []string{""}
+		}
+		maxW -= 2 * pdf.GetCellMargin()
+		lines := make([]string, 0, 2)
+		line := words[0]
+		for _, w := range words[1:] {
+			candidate := line + " " + w
+			if pdf.GetStringWidth(candidate) <= maxW {
+				line = candidate
+			} else {
+				lines = append(lines, line)
+				line = w
+			}
+		}
+		lines = append(lines, line)
+		return lines
+	}
+	tableRow := func(label, col2, col3, col4 string, fill bool) {
+		if fill {
+			pdf.SetFillColor(245, 245, 245)
+		} else {
+			pdf.SetFillColor(255, 255, 255)
+		}
+		text := latin(label)
+		lines := wrapLatin1(text, descW)
+		rowH := float64(len(lines)) * itemLineH
+		x0, y0 := pdf.GetXY()
+		if fill {
+			pdf.Rect(x0, y0, contentW, rowH, "F")
+		}
+		pdf.MultiCell(descW, itemLineH, text, "", "L", false)
+		pdf.SetXY(x0+descW, y0)
+		pdf.CellFormat(col2W, rowH, col2, "", 0, "CM", false, 0, "")
+		pdf.CellFormat(col3W, rowH, col3, "", 0, "RM", false, 0, "")
+		pdf.CellFormat(col4W, rowH, col4, "", 0, "RM", false, 0, "")
+		pdf.SetXY(x0, y0+rowH)
+	}
+
 	// ── Services ───────────────────────────────────────────────
 	if len(services) > 0 {
 		sectionHeader("Servicos")
 		pdf.SetFont("Helvetica", "B", 9)
 		pdf.SetFillColor(230, 230, 230)
-		pdf.CellFormat(contentW*0.5, 6, "Descricao", "B", 0, "L", true, 0, "")
-		pdf.CellFormat(contentW*0.15, 6, "Horas", "B", 0, "C", true, 0, "")
-		pdf.CellFormat(contentW*0.175, 6, "Unit.", "B", 0, "R", true, 0, "")
-		pdf.CellFormat(contentW*0.175, 6, "Total", "B", 1, "R", true, 0, "")
+		pdf.CellFormat(descW, 6, "Descricao", "B", 0, "L", true, 0, "")
+		pdf.CellFormat(col2W, 6, "Horas", "B", 0, "C", true, 0, "")
+		pdf.CellFormat(col3W, 6, "Unit.", "B", 0, "R", true, 0, "")
+		pdf.CellFormat(col4W, 6, "Total", "B", 1, "R", true, 0, "")
 		pdf.SetFont("Helvetica", "", 9)
 		for i, s := range services {
-			fill := i%2 == 0
-			if fill {
-				pdf.SetFillColor(245, 245, 245)
-			} else {
-				pdf.SetFillColor(255, 255, 255)
-			}
 			description := s.Description
 			if s.Status == 6 {
 				description += " - NÃO APROVADO, NÃO SERÁ COBRADO"
 			}
-			pdf.CellFormat(contentW*0.5, 6, latin(description), "", 0, "L", fill, 0, "")
-			pdf.CellFormat(contentW*0.15, 6, fmt.Sprintf("%.2f", s.Hours), "", 0, "C", fill, 0, "")
-			pdf.CellFormat(contentW*0.175, 6, fmtBRL(s.UnitValue), "", 0, "R", fill, 0, "")
-			pdf.CellFormat(contentW*0.175, 6, fmtBRL(s.Total), "", 1, "R", fill, 0, "")
+			tableRow(description, fmt.Sprintf("%.2f", s.Hours), fmtBRL(s.UnitValue), fmtBRL(s.Total), i%2 == 0)
 		}
 		pdf.Ln(2)
 	}
@@ -788,23 +1205,14 @@ func buildOSPDF(data osData, products []osProduct, services []osService, payment
 		pdf.SetFont("Helvetica", "B", 9)
 		pdf.SetFillColor(230, 230, 230)
 		pdf.SetTextColor(30, 30, 30)
-		pdf.CellFormat(contentW*0.5, 6, "Produto", "B", 0, "L", true, 0, "")
-		pdf.CellFormat(contentW*0.15, 6, "Qtd", "B", 0, "C", true, 0, "")
-		pdf.CellFormat(contentW*0.175, 6, "Unit.", "B", 0, "R", true, 0, "")
-		pdf.CellFormat(contentW*0.175, 6, "Total", "B", 1, "R", true, 0, "")
+		pdf.CellFormat(descW, 6, "Produto", "B", 0, "L", true, 0, "")
+		pdf.CellFormat(col2W, 6, "Qtd", "B", 0, "C", true, 0, "")
+		pdf.CellFormat(col3W, 6, "Unit.", "B", 0, "R", true, 0, "")
+		pdf.CellFormat(col4W, 6, "Total", "B", 1, "R", true, 0, "")
 		pdf.SetFont("Helvetica", "", 9)
 		for i, p := range products {
-			fill := i%2 == 0
-			if fill {
-				pdf.SetFillColor(245, 245, 245)
-			} else {
-				pdf.SetFillColor(255, 255, 255)
-			}
 			lineTotal := p.Quantity * p.Price
-			pdf.CellFormat(contentW*0.5, 6, latin(p.Name), "", 0, "L", fill, 0, "")
-			pdf.CellFormat(contentW*0.15, 6, fmt.Sprintf("%.2f", p.Quantity), "", 0, "C", fill, 0, "")
-			pdf.CellFormat(contentW*0.175, 6, fmtBRL(p.Price), "", 0, "R", fill, 0, "")
-			pdf.CellFormat(contentW*0.175, 6, fmtBRL(lineTotal), "", 1, "R", fill, 0, "")
+			tableRow(p.Name, fmt.Sprintf("%.2f", p.Quantity), fmtBRL(p.Price), fmtBRL(lineTotal), i%2 == 0)
 		}
 		pdf.Ln(2)
 	}
@@ -881,9 +1289,87 @@ func buildOSPDF(data osData, products []osProduct, services []osService, payment
 	pdf.Ln(2)
 	pdf.CellFormat(contentW, 6, latin("Assinatura cliente/seguradora: ______________________________"), "", 1, "L", false, 0, "")
 
+	// ── Photos (appended after everything else, two per row) ───────────
+	if len(photos) > 0 {
+		pdf.AddPage()
+		sectionHeader("Fotos")
+		pdf.Ln(3)
+		const gap = 4.0
+		cellW := (contentW - gap) / 2
+		const cellH = 85.0
+		bottom := pageH - 15
+		col := 0
+		rowTop := pdf.GetY()
+		for i, jpg := range photos {
+			if col == 0 && rowTop+cellH > bottom {
+				pdf.AddPage()
+				rowTop = pdf.GetY()
+			}
+			name := fmt.Sprintf("photo-%d", i)
+			opt := fpdf.ImageOptions{ImageType: "JPEG"}
+			info := pdf.RegisterImageOptionsReader(name, opt, bytes.NewReader(jpg))
+			if info != nil && pdf.Ok() && info.Width() > 0 && info.Height() > 0 {
+				w, h := cellW, cellW*info.Height()/info.Width()
+				if h > cellH {
+					h = cellH
+					w = cellH * info.Width() / info.Height()
+				}
+				x := 15 + float64(col)*(cellW+gap) + (cellW-w)/2
+				pdf.ImageOptions(name, x, rowTop+(cellH-h)/2, w, h, false, opt, 0, "")
+			}
+			col++
+			if col == 2 {
+				col = 0
+				rowTop += cellH + gap
+			}
+		}
+	}
+
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// prepareJPEGForPDF decodes an uploaded photo (jpeg/png/gif) and re-encodes it
+// as a JPEG no larger than maxPhotoSide px on its longest side, keeping the
+// PDF small enough to send over WhatsApp.
+func prepareJPEGForPDF(raw []byte) ([]byte, error) {
+	const maxPhotoSide = 1200
+	src, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	b := src.Bounds()
+	sw, sh := b.Dx(), b.Dy()
+	if sw == 0 || sh == 0 {
+		return nil, fmt.Errorf("empty image")
+	}
+	dw, dh := sw, sh
+	if longest := max(sw, sh); longest > maxPhotoSide {
+		dw, dh = sw*maxPhotoSide/longest, sh*maxPhotoSide/longest
+		if dw < 1 {
+			dw = 1
+		}
+		if dh < 1 {
+			dh = 1
+		}
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
+	for y := 0; y < dh; y++ {
+		for x := 0; x < dw; x++ {
+			r, g, bl, a := src.At(b.Min.X+x*sw/dw, b.Min.Y+y*sh/dh).RGBA()
+			// flatten transparency onto white (JPEG has no alpha)
+			inv := 0xffff - a
+			dst.SetRGBA(x, y, color.RGBA{
+				R: uint8((r + inv) >> 8), G: uint8((g + inv) >> 8), B: uint8((bl + inv) >> 8), A: 255,
+			})
+		}
+	}
+	var out bytes.Buffer
+	if err := jpeg.Encode(&out, dst, &jpeg.Options{Quality: 80}); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }

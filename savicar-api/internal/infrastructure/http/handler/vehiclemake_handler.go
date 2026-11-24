@@ -30,10 +30,26 @@ func (h *VehicleMakeHandler) RegisterRoutes(r gin.IRouter) {
 // @Summary     List all vehicle makes
 // @Tags        makes
 // @Produce     json
+// @Param       tipo query    int false "Filter by type (1=Veículos, 2=Produtos, 3=Ambos)"
 // @Success     200 {array}  vehiclemake.VehicleMake
+// @Failure     400 {object} map[string]string
 // @Failure     500 {object} map[string]string
 // @Router      /makes [get]
 func (h *VehicleMakeHandler) getAll(c *gin.Context) {
+	if tipoStr := c.Query("tipo"); tipoStr != "" {
+		tipo, err := strconv.Atoi(tipoStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tipo"})
+			return
+		}
+		items, err := h.svc.GetByType(c.Request.Context(), tipo)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, items)
+		return
+	}
 	items, err := h.svc.GetAll(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -9,7 +9,8 @@ ERP automotivo self-hosted para oficinas mecânicas. Monorepo com backend Go e f
 ```
 savicar/
 ├── savicar-api/     # Backend Go (porta 8080)
-├── savicar-web/     # Frontend React/Vite (porta 5173)
+├── savicar-web/     # Frontend React/Vite (porta 5173) — branding Savicar
+├── badencar-web/    # Frontend React/Vite — branding Badencar, mesmo backend (savicar-api)
 ├── build.ps1        # Script oficial de build de produção — ver seção "Build de produção"
 └── CLAUDE.md
 ```
@@ -114,7 +115,7 @@ cd C:\work\badencar\savicar
 
 O `main.go` do `savicar-api` embute o frontend via `//go:embed dist` (pasta `savicar-api/dist`) — o binário é self-contained, não serve arquivos de `savicar-web/dist` do disco. Por isso o build de produção **precisa** passar pelo `build.ps1`, que:
 
-1. Builda `savicar-web` (`npm run build`) **e** o frontend do projeto irmão `badencar`, em `C:\work\badencar\badencar\badencar-web` (repo separado, fora de `savicar/`).
+1. Builda `savicar-web` (`npm run build`) **e** `badencar-web` (`npm run build`) — dois frontends independentes dentro deste mesmo repo, cada um com seu `package.json`/`node_modules` próprio.
 2. Copia cada `dist/` gerado para dentro de `savicar-api\dist\` antes de compilar (por isso a ordem importa — nunca rode `go build` manual em `savicar-api` sem antes colocar o `dist` certo lá).
 3. Gera ícone (`.ico`/`.syso` via `rsrc`, instalado automaticamente se faltar) e compila com `-H windowsgui -s -w` (sem janela de console).
 4. Ao final, restaura `savicar-api\dist\index.html` para um placeholder (`build placeholder`) — esse é o estado normal do arquivo no git; se você ver o `dist/` real ali fora de um build em andamento, foi rodado `go build` manual por engano.

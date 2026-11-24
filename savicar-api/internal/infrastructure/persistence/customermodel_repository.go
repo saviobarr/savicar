@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"strings"
 
 	"savicar-api/internal/domain/customermodel"
 )
@@ -70,11 +71,63 @@ func (r *SQLServerCustomerModelRepository) FindByID(ctx context.Context, id int)
 	return &cm, nil
 }
 
+func (r *SQLServerCustomerModelRepository) FindByClientUUID(ctx context.Context, clientUUID string) (*customermodel.CustomerModel, error) {
+	query := `SELECT ID_CUSTOMER_MODEL, ID_CUSTOMER, ID_MODEL, PLATE, YEAR_MAKE, YEAR_MODEL, COLOR, VIN
+	 FROM CUSTOMER_MODEL WHERE CLIENT_UUID = ?`
+	var cm customermodel.CustomerModel
+	err := r.db.QueryRowContext(ctx, query, clientUUID).Scan(
+		&cm.IDCustomerModel, &cm.IDCustomer, &cm.IDModel, &cm.Plate, &cm.YearMake, &cm.YearModel, &cm.Color, &cm.VIN,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		r.log.ErrorContext(ctx, "FindByClientUUID failed", slog.String("client_uuid", clientUUID), slog.Any("error", err))
+		return nil, err
+	}
+	cm.Plate = trimStringPtr(cm.Plate)
+	cm.Color = trimStringPtr(cm.Color)
+	cm.VIN = trimStringPtr(cm.VIN)
+	return &cm, nil
+}
+
+// FindByPlate matches ignoring case, hyphens and spaces, so "ABC-1234",
+// "abc1234" and "ABC 1234" all resolve to the same stored row.
+func (r *SQLServerCustomerModelRepository) FindByPlate(ctx context.Context, plate string) (*customermodel.CustomerModel, error) {
+	normalized := strings.ToUpper(strings.ReplaceAll(strings.ReplaceAll(plate, "-", ""), " ", ""))
+	query := `SELECT cm.ID_CUSTOMER_MODEL, cm.ID_CUSTOMER, cm.ID_MODEL, m.NAME,
+	 COALESCE(NULLIF(c.INDIVIDUAL_NAME, ''), NULLIF(c.TRADE_NAME, ''), NULLIF(c.LEGAL_NAME, '')),
+	 cm.PLATE, cm.YEAR_MAKE, cm.YEAR_MODEL, cm.COLOR, cm.VIN
+	 FROM CUSTOMER_MODEL cm
+	 LEFT JOIN MODEL m ON m.ID_MODEL = cm.ID_MODEL
+	 LEFT JOIN CUSTOMER c ON c.ID_CUSTOMER = cm.ID_CUSTOMER
+	 WHERE UPPER(REPLACE(REPLACE(cm.PLATE, '-', ''), ' ', '')) = ?
+	 LIMIT 1`
+	var cm customermodel.CustomerModel
+	err := r.db.QueryRowContext(ctx, query, normalized).Scan(
+		&cm.IDCustomerModel, &cm.IDCustomer, &cm.IDModel, &cm.ModelName, &cm.CustomerName,
+		&cm.Plate, &cm.YearMake, &cm.YearModel, &cm.Color, &cm.VIN,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		r.log.ErrorContext(ctx, "FindByPlate failed", slog.String("plate", normalized), slog.Any("error", err))
+		return nil, err
+	}
+	cm.ModelName = trimStringPtr(cm.ModelName)
+	cm.CustomerName = trimStringPtr(cm.CustomerName)
+	cm.Plate = trimStringPtr(cm.Plate)
+	cm.Color = trimStringPtr(cm.Color)
+	cm.VIN = trimStringPtr(cm.VIN)
+	return &cm, nil
+}
+
 func (r *SQLServerCustomerModelRepository) Create(ctx context.Context, cm *customermodel.CustomerModel) error {
-	query := `INSERT INTO CUSTOMER_MODEL (ID_CUSTOMER, ID_MODEL, PLATE, YEAR_MAKE, YEAR_MODEL, COLOR, VIN)
-	 VALUES (?, ?, ?, ?, ?, ?, ?)`
-	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{cm.IDCustomer, cm.IDModel, cm.Plate, cm.YearMake, cm.YearModel, cm.Color, cm.VIN}))
-	result, err := r.db.ExecContext(ctx, query, cm.IDCustomer, cm.IDModel, cm.Plate, cm.YearMake, cm.YearModel, cm.Color, cm.VIN)
+	query := `INSERT INTO CUSTOMER_MODEL (ID_CUSTOMER, ID_MODEL, PLATE, YEAR_MAKE, YEAR_MODEL, COLOR, VIN, CLIENT_UUID)
+	 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{cm.IDCustomer, cm.IDModel, cm.Plate, cm.YearMake, cm.YearModel, cm.Color, cm.VIN, cm.ClientUUID}))
+	result, err := r.db.ExecContext(ctx, query, cm.IDCustomer, cm.IDModel, cm.Plate, cm.YearMake, cm.YearModel, cm.Color, cm.VIN, cm.ClientUUID)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))
 		return err

@@ -135,6 +135,7 @@ export default function VehicleModelPage() {
       FormComponent={VehicleModelForm}
       filterKeys={['make_name', 'name', 'version']}
       filterPlaceholder="Filtrar por marca ou modelo..."
+      persistSearch={false}
       pageSize={15}
     />
   )

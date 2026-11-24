@@ -84,18 +84,76 @@ func (r *SQLServerCustomerRepository) FindByID(ctx context.Context, id int) (*cu
 	return &c, nil
 }
 
+func (r *SQLServerCustomerRepository) FindByClientUUID(ctx context.Context, clientUUID string) (*customer.Customer, error) {
+	query := `SELECT ID_CUSTOMER, IS_LEGAL_PERSON, IS_ACTIVE, LEGAL_NAME, TRADE_NAME, INDIVIDUAL_NAME,
+	 DOB, GENDER, TAX_ID, WEB_SITE, STATE_REGISTRATION, MUNICIPAL_REGISTRATION, IMAGE_PATH
+	 FROM CUSTOMER WHERE CLIENT_UUID = ?`
+	var c customer.Customer
+	err := r.db.QueryRowContext(ctx, query, clientUUID).Scan(
+		&c.IDCustomer, &c.IsLegalPerson, &c.IsActive, &c.LegalName, &c.TradeName,
+		&c.IndividualName, &c.DOB, &c.Gender, &c.TaxID, &c.WebSite,
+		&c.StateRegistration, &c.MunicipalRegistration, &c.ImagePath,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		r.log.ErrorContext(ctx, "FindByClientUUID failed", slog.String("client_uuid", clientUUID), slog.Any("error", err))
+		return nil, err
+	}
+	c.LegalName = trimStringPtr(c.LegalName)
+	c.TradeName = trimStringPtr(c.TradeName)
+	c.IndividualName = trimStringPtr(c.IndividualName)
+	c.DOB = trimStringPtr(c.DOB)
+	c.TaxID = trimStringPtr(c.TaxID)
+	c.WebSite = trimStringPtr(c.WebSite)
+	c.StateRegistration = trimStringPtr(c.StateRegistration)
+	c.MunicipalRegistration = trimStringPtr(c.MunicipalRegistration)
+	c.ImagePath = trimStringPtr(c.ImagePath)
+	return &c, nil
+}
+
+func (r *SQLServerCustomerRepository) FindByTaxID(ctx context.Context, taxID string) (*customer.Customer, error) {
+	query := `SELECT ID_CUSTOMER, IS_LEGAL_PERSON, IS_ACTIVE, LEGAL_NAME, TRADE_NAME, INDIVIDUAL_NAME,
+	 DOB, GENDER, TAX_ID, WEB_SITE, STATE_REGISTRATION, MUNICIPAL_REGISTRATION, IMAGE_PATH
+	 FROM CUSTOMER WHERE TAX_ID = ?`
+	var c customer.Customer
+	err := r.db.QueryRowContext(ctx, query, taxID).Scan(
+		&c.IDCustomer, &c.IsLegalPerson, &c.IsActive, &c.LegalName, &c.TradeName,
+		&c.IndividualName, &c.DOB, &c.Gender, &c.TaxID, &c.WebSite,
+		&c.StateRegistration, &c.MunicipalRegistration, &c.ImagePath,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		r.log.ErrorContext(ctx, "FindByTaxID failed", slog.String("tax_id", taxID), slog.Any("error", err))
+		return nil, err
+	}
+	c.LegalName = trimStringPtr(c.LegalName)
+	c.TradeName = trimStringPtr(c.TradeName)
+	c.IndividualName = trimStringPtr(c.IndividualName)
+	c.DOB = trimStringPtr(c.DOB)
+	c.TaxID = trimStringPtr(c.TaxID)
+	c.WebSite = trimStringPtr(c.WebSite)
+	c.StateRegistration = trimStringPtr(c.StateRegistration)
+	c.MunicipalRegistration = trimStringPtr(c.MunicipalRegistration)
+	c.ImagePath = trimStringPtr(c.ImagePath)
+	return &c, nil
+}
+
 func (r *SQLServerCustomerRepository) Create(ctx context.Context, c *customer.Customer) error {
 	query := `INSERT INTO CUSTOMER
 	 (IS_LEGAL_PERSON, IS_ACTIVE, LEGAL_NAME, TRADE_NAME, INDIVIDUAL_NAME,
-	  DOB, GENDER, TAX_ID, WEB_SITE, STATE_REGISTRATION, MUNICIPAL_REGISTRATION, IMAGE_PATH)
-	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	  DOB, GENDER, TAX_ID, WEB_SITE, STATE_REGISTRATION, MUNICIPAL_REGISTRATION, IMAGE_PATH, CLIENT_UUID)
+	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{
 		c.IsLegalPerson, c.IsActive, c.LegalName, c.TradeName, c.IndividualName,
-		c.DOB, c.Gender, c.TaxID, c.WebSite, c.StateRegistration, c.MunicipalRegistration, c.ImagePath,
+		c.DOB, c.Gender, c.TaxID, c.WebSite, c.StateRegistration, c.MunicipalRegistration, c.ImagePath, c.ClientUUID,
 	}))
 	result, err := r.db.ExecContext(ctx, query,
 		c.IsLegalPerson, c.IsActive, c.LegalName, c.TradeName, c.IndividualName,
-		c.DOB, c.Gender, c.TaxID, c.WebSite, c.StateRegistration, c.MunicipalRegistration, c.ImagePath,
+		c.DOB, c.Gender, c.TaxID, c.WebSite, c.StateRegistration, c.MunicipalRegistration, c.ImagePath, c.ClientUUID,
 	)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))

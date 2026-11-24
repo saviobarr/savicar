@@ -71,6 +71,7 @@ export default function CountryPage() {
       FormComponent={CountryForm}
       filterKeys={['name', 'abbreviation']}
       filterPlaceholder="Filtrar por nome ou sigla..."
+      persistSearch={false}
       pageSize={15}
       basePath="/countries"
     />

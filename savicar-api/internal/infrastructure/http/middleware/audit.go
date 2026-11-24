@@ -54,10 +54,9 @@ func Audit(repo audit.Repository) gin.HandlerFunc {
 			}
 		}
 
-		url := c.Request.Method + " " + c.FullPath()
-		if c.FullPath() == "" {
-			url = c.Request.Method + " " + c.Request.URL.Path
-		}
+		// Log the real path (e.g. /customers/42), not the route pattern (/customers/:id),
+		// so DELETE/PUT entries identify which record was affected.
+		url := c.Request.Method + " " + c.Request.URL.Path
 		if qs := c.Request.URL.RawQuery; qs != "" {
 			url += "?" + qs
 		}

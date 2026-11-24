@@ -9,7 +9,9 @@ import {
   fetchAllCustomer,
   fetchAllVehicleMake,
   fetchAllVehicleModel,
+  fetchVehicleByPlate,
 } from '../api'
+import { matchVehicleModel } from '../vehicleLookup'
 
 function customerDisplayName(c) {
   return c.individual_name || c.trade_name || c.legal_name || `Cliente #${c.id_customer}`
@@ -41,6 +43,8 @@ export function CustomerModelForm({ initialData, onSaved, onCancel }) {
   const [allModels, setAllModels] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [lookingUp, setLookingUp] = useState(false)
+  const [lookupError, setLookupError] = useState(null)
 
   useEffect(() => {
     fetchAllCustomer()
@@ -48,7 +52,7 @@ export function CustomerModelForm({ initialData, onSaved, onCancel }) {
         (data ?? []).sort((a, b) => customerDisplayName(a).localeCompare(customerDisplayName(b), 'pt-BR', { sensitivity: 'base' }))
       ))
       .catch(() => {})
-    fetchAllVehicleMake().then(data => setMakes(data ?? [])).catch(() => {})
+    fetchAllVehicleMake(1).then(data => setMakes(data ?? [])).catch(() => {})
     fetchAllVehicleModel().then(data => {
       setAllModels(data ?? [])
       if (initialData?.id_model) {
@@ -68,6 +72,33 @@ export function CustomerModelForm({ initialData, onSaved, onCancel }) {
       setForm(prev => ({ ...prev, id_make: value, id_model: '' }))
     } else {
       setForm(prev => ({ ...prev, [name]: value }))
+    }
+  }
+
+  async function handleLookupPlate() {
+    if (!form.plate.trim()) return
+    setLookingUp(true)
+    setLookupError(null)
+    try {
+      const result = await fetchVehicleByPlate(form.plate.trim())
+      const model = matchVehicleModel(result, makes, allModels)
+      setForm(prev => ({
+        ...prev,
+        plate: result.plate || prev.plate,
+        year_make: result.year_make || prev.year_make,
+        year_model: result.year_model || prev.year_model,
+        color: result.color || prev.color,
+        vin: result.chassis || prev.vin,
+        id_model: model ? model.id_model : prev.id_model,
+        id_make: model?.id_make != null ? String(model.id_make) : prev.id_make,
+      }))
+      if (!model) {
+        setLookupError('Veículo encontrado, mas não foi possível identificar o modelo automaticamente. Selecione manualmente.')
+      }
+    } catch (err) {
+      setLookupError(err.message || 'Erro ao consultar placa')
+    } finally {
+      setLookingUp(false)
     }
   }
 
@@ -110,10 +141,27 @@ export function CustomerModelForm({ initialData, onSaved, onCancel }) {
         </select>
       </div>
       <div className="form-group">
+        <label>Placa</label>
+        <div className="plate-search-field">
+          <input type="text" name="plate" value={form.plate} onChange={handleChange} autoFocus />
+          <button
+            type="button"
+            className="btn-plate-search"
+            onClick={handleLookupPlate}
+            disabled={lookingUp || !form.plate.trim()}
+            title="Buscar dados do veículo pela placa"
+          >{lookingUp ? '⏳' : '🔍'}</button>
+        </div>
+        {lookupError && <p className="error">{lookupError}</p>}
+      </div>
+      <div className="form-group">
         <label>Marca</label>
         <select name="id_make" value={form.id_make} onChange={handleChange}>
           <option value="">— Todas —</option>
-          {makes.map(mk => (
+          {makes
+            .slice()
+            .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'pt-BR', { sensitivity: 'base' }))
+            .map(mk => (
             <option key={mk.id_make} value={mk.id_make}>{mk.name}</option>
           ))}
         </select>
@@ -125,9 +173,9 @@ export function CustomerModelForm({ initialData, onSaved, onCancel }) {
           {filteredModels
             .slice()
             .sort((a, b) => {
-              const la = `${a.name ?? ''}${a.version ? ` ${a.version}` : ''}`.toLowerCase()
-              const lb = `${b.name ?? ''}${b.version ? ` ${b.version}` : ''}`.toLowerCase()
-              return la.localeCompare(lb)
+              const la = `${a.name ?? ''}${a.version ? ` ${a.version}` : ''}`
+              const lb = `${b.name ?? ''}${b.version ? ` ${b.version}` : ''}`
+              return la.localeCompare(lb, 'pt-BR', { sensitivity: 'base', numeric: true })
             })
             .map(m => (
               <option key={m.id_model} value={m.id_model}>
@@ -135,10 +183,6 @@ export function CustomerModelForm({ initialData, onSaved, onCancel }) {
               </option>
             ))}
         </select>
-      </div>
-      <div className="form-group">
-        <label>Placa</label>
-        <input type="text" name="plate" value={form.plate} onChange={handleChange} />
       </div>
       <div className="form-group">
         <label>Ano Fabricação</label>
@@ -178,6 +222,7 @@ export default function CustomerModelPage() {
       FormComponent={CustomerModelForm}
       filterKeys={['customer_name', 'model_name', 'plate']}
       filterPlaceholder="Cliente, Modelo ou Placa..."
+      persistSearch={false}
       pageSize={15}
       basePath="/customer-models"
     />

@@ -24,8 +24,8 @@ func (h *NfseHandler) RegisterRoutes(r gin.IRouter) {
 	r.POST("/nfse/preview", h.preview)
 }
 
-func withRef(ref string, statusCode int, body []byte) gin.H {
-	out := gin.H{"ref": ref, "focus_status_code": statusCode}
+func withRef(ref string, statusCode int, body []byte, curl string) gin.H {
+	out := gin.H{"ref": ref, "focus_status_code": statusCode, "focus_curl": curl}
 	var parsed any
 	if len(body) > 0 && json.Unmarshal(body, &parsed) == nil {
 		out["focus_response"] = parsed
@@ -45,12 +45,12 @@ func (h *NfseHandler) emitir(c *gin.Context) {
 		return
 	}
 
-	ref, status, body, err := h.svc.EmitirNFSe(c.Request.Context(), payload)
+	ref, status, body, curl, err := h.svc.EmitirNFSe(c.Request.Context(), payload)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "ref": ref})
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "ref": ref, "focus_curl": curl})
 		return
 	}
-	c.JSON(http.StatusOK, withRef(ref, status, body))
+	c.JSON(http.StatusOK, withRef(ref, status, body, curl))
 }
 
 // preview renders a draft DANFSe PDF from the DPS currently on the NFS-e
@@ -70,13 +70,19 @@ func (h *NfseHandler) preview(c *gin.Context) {
 }
 
 // consultar re-checks the status of a DPS already submitted via emitir,
-// identified by the reference returned back then.
+// identified by the reference returned back then. tomador and valor_servico
+// are optional — when the NFS-e screen still has the original form values
+// (the common case: the user is re-checking the same emission attempt), it
+// sends them along so an invoice that only gets authorized on this later
+// check can still have its nf record completed.
 func (h *NfseHandler) consultar(c *gin.Context) {
 	ref := c.Param("ref")
-	status, body, err := h.svc.ConsultarNFSe(c.Request.Context(), ref)
+	tomador := c.Query("tomador")
+	valorServico := c.Query("valor_servico")
+	status, body, curl, err := h.svc.ConsultarNFSe(c.Request.Context(), ref, tomador, valorServico)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "ref": ref})
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "ref": ref, "focus_curl": curl})
 		return
 	}
-	c.JSON(http.StatusOK, withRef(ref, status, body))
+	c.JSON(http.StatusOK, withRef(ref, status, body, curl))
 }

@@ -6,8 +6,11 @@ import CrudPage from '../components/CrudPage'
 import { makeFormPages } from '../components/CrudFormPage'
 import { loadFilters, saveFilters } from '../filterStorage'
 import { matchesSearchQuery } from '../searchUtils'
+import { matchVehicleModel } from '../vehicleLookup'
 import { CustomerForm } from './CustomerPage'
 import { InventoryForm } from './InventoryPage'
+import { TechnicianForm } from './TechnicianPage'
+import ServiceOrderMediaTab from './ServiceOrderMediaTab'
 import {
   fetchAllServiceOrder,
   fetchTenantConfig,
@@ -20,15 +23,18 @@ import {
   fetchAllCustomer,
   fetchAllCustomerModel,
   createCustomerModel,
+  updateCustomerModel,
   fetchAllVehicleMake,
   fetchAllVehicleModel,
   createVehicleModel,
+  fetchVehicleByPlate,
   fetchAllTechnician,
   fetchAllServices,
   createServices,
   updateServices,
   deleteServices,
   fetchAllInventory,
+  createInventory,
   fetchServiceOrderProductsByOrder,
   createServiceOrderProduct,
   updateServiceOrderProduct,
@@ -39,6 +45,7 @@ import {
   updatePayment,
   deletePayment,
 } from '../api'
+import { serverNow, serverTodayISO, localISODate } from '../serverClock'
 
 function customerDisplayName(c) {
   return c.individual_name || c.trade_name || c.legal_name || `Cliente #${c.id_customer}`
@@ -62,9 +69,9 @@ function CustomerAutocomplete({ value, onChange, customers = [] }) {
     const q = e.target.value
     setQuery(q)
     if (!q.trim()) {
-      setSuggestions([])
-      setOpen(false)
       onChange('')
+      setSuggestions(customers)
+      setOpen(customers.length > 0)
       return
     }
     const lower = q.toLowerCase()
@@ -168,9 +175,8 @@ function SelectAutocomplete({ items, value, onChange, getLabel, getId, placehold
     const q = e.target.value
     setQuery(q)
     if (!q.trim()) {
-      setSuggestions([])
-      setOpen(false)
       onChange('')
+      openDropdown(items.slice(0, maxSuggestions))
       return
     }
     const matches = items.filter(i => matchesSearchQuery(getLabel(i) || '', q)).slice(0, maxSuggestions)
@@ -220,7 +226,7 @@ function SelectAutocomplete({ items, value, onChange, getLabel, getId, placehold
         value={query}
         onChange={handleInput}
         onFocus={handleFocus}
-        onBlur={() => { focusedRef.current = false }}
+        onBlur={() => { focusedRef.current = false; setOpen(false) }}
         placeholder={placeholder}
         autoComplete="off"
         disabled={disabled}
@@ -279,9 +285,9 @@ function CustomerModelAutocomplete({ value, onChange, idCustomer, allModels }) {
     const q = e.target.value
     setQuery(q)
     if (!q.trim()) {
-      setSuggestions([])
-      setOpen(false)
       onChange('')
+      setSuggestions(customerModels.slice(0, 10))
+      setOpen(customerModels.length > 0)
       return
     }
     const lower = q.toLowerCase()
@@ -355,6 +361,7 @@ function NewVehicleModelModal({ idMake, makeName, onSaved, onCancel }) {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    e.stopPropagation()
     setSaving(true)
     setError(null)
     try {
@@ -395,15 +402,15 @@ function NewVehicleModelModal({ idMake, makeName, onSaved, onCancel }) {
   )
 }
 
-export function NewCustomerModal({ onSaved, onCancel }) {
+export function NewCustomerModal({ customer = null, onSaved, onCancel }) {
   return createPortal(
     <div className="form-modal-overlay">
       <div className="form-modal" onClick={e => e.stopPropagation()}>
         <div className="form-modal-header">
-          <span>Novo Cliente</span>
+          <span>{customer ? 'Editar Cliente' : 'Novo Cliente'}</span>
           <button className="modal-close" onClick={onCancel}>✕</button>
         </div>
-        <CustomerForm initialData={null} onSaved={onSaved} onCancel={onCancel} />
+        <CustomerForm initialData={customer} onSaved={onSaved} onCancel={onCancel} />
       </div>
     </div>,
     document.body
@@ -425,18 +432,64 @@ export function NewProductModal({ onSaved, onCancel }) {
   )
 }
 
+export function NewTechnicianModal({ onSaved, onCancel }) {
+  return createPortal(
+    <div className="form-modal-overlay">
+      <div className="form-modal" onClick={e => e.stopPropagation()}>
+        <div className="form-modal-header">
+          <span>Novo Técnico</span>
+          <button className="modal-close" onClick={onCancel}>✕</button>
+        </div>
+        <TechnicianForm initialData={null} onSaved={onSaved} onCancel={onCancel} />
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 export function NewCarModal({ idCustomer, onSaved, onCancel }) {
-  const [car, setCar] = useState({ id_make: '', id_model: '', plate: '', year_make: '', year_model: '', color: '' })
+  const [car, setCar] = useState({ id_make: '', id_model: '', plate: '', vin: '', year_make: '', year_model: '', color: '' })
   const [makes, setMakes] = useState([])
   const [vehicleModels, setVehicleModels] = useState([])
   const [newModelOpen, setNewModelOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [lookingUp, setLookingUp] = useState(false)
+  const [lookupError, setLookupError] = useState(null)
 
   useEffect(() => {
-    fetchAllVehicleMake().then(setMakes).catch(() => {})
+    fetchAllVehicleMake(1)
+      .then(list => setMakes([...list].sort((a, b) => (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase()))))
+      .catch(() => {})
     fetchAllVehicleModel().then(setVehicleModels).catch(() => {})
   }, [])
+
+  async function handleLookupPlate() {
+    if (!car.plate.trim()) return
+    setLookingUp(true)
+    setLookupError(null)
+    try {
+      const result = await fetchVehicleByPlate(car.plate.trim())
+      const model = matchVehicleModel(result, makes, vehicleModels)
+      setCar(prev => ({
+        ...prev,
+        plate: result.plate || prev.plate,
+        year_make: result.year_make || prev.year_make,
+        year_model: result.year_model || prev.year_model,
+        color: result.color || prev.color,
+        vin: result.chassis ? result.chassis.toUpperCase().replace(/\s/g, '') : prev.vin,
+        id_model: model ? model.id_model : prev.id_model,
+        id_make: model?.id_make != null ? String(model.id_make) : prev.id_make,
+      }))
+      if (!model) {
+        setLookupError('Veículo encontrado, mas não foi possível identificar o modelo automaticamente. Selecione manualmente.')
+      }
+    } catch (err) {
+      setLookupError(err.message || 'Erro ao consultar placa')
+    } finally {
+      setLookingUp(false)
+    }
+  }
 
   function handleNewModelSaved(created) {
     const newModel = { ...created, id_make: car.id_make }
@@ -445,9 +498,14 @@ export function NewCarModal({ idCustomer, onSaved, onCancel }) {
     setNewModelOpen(false)
   }
 
-  const filteredModels = car.id_make
+  const filteredModels = (car.id_make
     ? vehicleModels.filter(m => String(m.id_make) === String(car.id_make))
     : vehicleModels
+  ).slice().sort((a, b) => {
+    const nameA = `${a.name ?? ''}${a.version ? ` ${a.version}` : ''}`.toLowerCase()
+    const nameB = `${b.name ?? ''}${b.version ? ` ${b.version}` : ''}`.toLowerCase()
+    return nameA.localeCompare(nameB)
+  })
 
   function handleChange(e) {
     const { name, value } = e.target
@@ -470,6 +528,7 @@ export function NewCarModal({ idCustomer, onSaved, onCancel }) {
         id_model: carPayload.id_model ? Number(carPayload.id_model) : undefined,
         year_make: carPayload.year_make !== '' ? Number(carPayload.year_make) : undefined,
         year_model: carPayload.year_model !== '' ? Number(carPayload.year_model) : undefined,
+        vin: carPayload.vin.trim() || null,
         id_customer: Number(idCustomer),
       })
       onSaved(created)
@@ -494,6 +553,20 @@ export function NewCarModal({ idCustomer, onSaved, onCancel }) {
           <button className="modal-close" onClick={onCancel}>✕</button>
         </div>
         <form onSubmit={handleSubmit} className="crud-form">
+          <div className="form-group">
+            <label>Placa</label>
+            <div className="plate-search-field">
+              <input type="text" name="plate" value={car.plate} onChange={handleChange} autoFocus />
+              <button
+                type="button"
+                className="btn-plate-search"
+                onClick={handleLookupPlate}
+                disabled={lookingUp || !car.plate.trim()}
+                title="Buscar dados do veículo pela placa"
+              >{lookingUp ? '⏳' : '🔍'}</button>
+            </div>
+            {lookupError && <p className="error">{lookupError}</p>}
+          </div>
           <div className="form-group">
             <label>Marca</label>
             <SelectAutocomplete
@@ -527,10 +600,6 @@ export function NewCarModal({ idCustomer, onSaved, onCancel }) {
             </div>
           </div>
           <div className="form-group">
-            <label>Placa</label>
-            <input type="text" name="plate" value={car.plate} onChange={handleChange} autoFocus />
-          </div>
-          <div className="form-group">
             <label>Ano Fabricação</label>
             <input type="number" name="year_make" value={car.year_make} onChange={handleChange} />
           </div>
@@ -541,6 +610,15 @@ export function NewCarModal({ idCustomer, onSaved, onCancel }) {
           <div className="form-group">
             <label>Cor</label>
             <input type="text" name="color" value={car.color} onChange={handleChange} />
+          </div>
+          <div className="form-group">
+            <label>Chassi (VIN)</label>
+            <input
+              type="text"
+              name="vin"
+              value={car.vin}
+              onChange={e => setCar(prev => ({ ...prev, vin: e.target.value.toUpperCase().replace(/\s/g, '') }))}
+            />
           </div>
           {error && <p className="error">{error}</p>}
           <div className="form-actions">
@@ -619,7 +697,7 @@ async function printServiceOrder(data, services, products, payments, inventoryIt
     <table class="tbl"><thead><tr><th>Produto</th><th>Qtd</th><th>Valor Unit.</th><th>Total</th></tr></thead><tbody>
     ${products.map(p => {
       const inv = inventoryItems.find(i => i.id_product === Number(p.id_product))
-      const price = inv?.sales_price != null ? Number(inv.sales_price) : null
+      const price = lineUnitPrice(p, inv)
       const lineTotal = price != null && p.quantity ? price * Number(p.quantity) : null
       return `<tr>
         <td>${p.product_name ?? inv?.name ?? p.id_product}</td>
@@ -698,6 +776,7 @@ async function printServiceOrder(data, services, products, payments, inventoryIt
     ${row('Chassi (VIN)', data.vin)}
     ${row('Hodômetro (km)', data.odometer_reading)}
     ${row('Obs. do Cliente', data.customer_notes)}
+    ${row('Observações Gerais', data.remarks)}
     ${row('Diagnóstico', data.diagnosis_notes)}
   </table>
   ${servicesHtml}
@@ -734,6 +813,7 @@ function ServiceOrderDetailFull({ data }) {
   const [loading, setLoading] = useState(true)
   const [sendWpp, setSendWpp] = useState(false)
   const [wppOpen, setWppOpen] = useState(false)
+  const [tab, setTab] = useState('detalhes')
 
   function isoToBR(iso) {
     if (!iso) return ''
@@ -773,6 +853,36 @@ function ServiceOrderDetailFull({ data }) {
 
   return (
     <div className="detail-body">
+      <div style={{ display: 'flex', borderBottom: '2px solid #1e2533', marginBottom: '16px' }}>
+        {['detalhes', 'midia'].map(v => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setTab(v)}
+            style={{
+              padding: '8px 22px',
+              background: 'none',
+              border: 'none',
+              borderBottom: tab === v ? '2px solid #e60000' : '2px solid transparent',
+              marginBottom: '-2px',
+              color: tab === v ? '#fff' : '#64748b',
+              fontWeight: 700,
+              fontSize: '0.9rem',
+              cursor: 'pointer',
+              transition: 'color 0.15s',
+            }}
+          >
+            {v === 'detalhes' ? 'Detalhes' : 'Mídia'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'midia' && (
+        <ServiceOrderMediaTab orderId={data.id_order} customerName={data.customer_name} />
+      )}
+
+      {tab !== 'midia' && (
+      <>
       <DetailRow label="OS"                value={data.id_order} />
       <DetailRow label="Cliente"           value={data.customer_name} />
       <DetailRow label="Modelo"            value={data.model_name} />
@@ -785,13 +895,14 @@ function ServiceOrderDetailFull({ data }) {
       <DetailRow label="Hodômetro (km)"    value={data.odometer_reading} />
       <DetailRow label="Obs. do Cliente"   value={data.customer_notes} />
       <DetailRow label="Obs. Internas"     value={data.internal_notes} />
+      <DetailRow label="Observações Gerais" value={data.remarks} />
       <DetailRow label="Diagnóstico"       value={data.diagnosis_notes} />
 
       {loading && <p style={{ fontSize: '0.85rem', color: '#888', marginTop: 12 }}>Carregando...</p>}
 
       {!loading && services.length > 0 && (
         <div className="contact-section" style={{ marginTop: 16 }}>
-          <div className="contact-section-header"><span>Serviços</span></div>
+          <div className="contact-section-header os-section-title"><span>Serviços</span></div>
           <table className="services-table">
             <thead>
               <tr>
@@ -812,12 +923,17 @@ function ServiceOrderDetailFull({ data }) {
               ))}
             </tbody>
           </table>
+          <div className="section-total">
+            Total de Serviços: {services
+              .reduce((acc, s) => Number(s.status) === 6 ? acc : acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
+              .toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          </div>
         </div>
       )}
 
       {!loading && products.length > 0 && (
         <div className="contact-section" style={{ marginTop: 16 }}>
-          <div className="contact-section-header"><span>Produtos</span></div>
+          <div className="contact-section-header os-section-title"><span>Produtos</span></div>
           <table className="services-table">
             <thead>
               <tr>
@@ -830,7 +946,7 @@ function ServiceOrderDetailFull({ data }) {
             <tbody>
               {products.map((p, idx) => {
                 const inv = inventoryItems.find(i => i.id_product === Number(p.id_product))
-                const price = inv?.sales_price != null ? Number(inv.sales_price) : null
+                const price = lineUnitPrice(p, inv)
                 const lineTotal = price != null && p.quantity ? price * Number(p.quantity) : null
                 return (
                   <tr key={p.id_service_order_product ?? idx}>
@@ -843,12 +959,21 @@ function ServiceOrderDetailFull({ data }) {
               })}
             </tbody>
           </table>
+          <div className="section-total">
+            Total de Produtos: {products
+              .reduce((acc, p) => {
+                const inv = inventoryItems.find(i => i.id_product === Number(p.id_product))
+                const price = lineUnitPrice(p, inv)
+                return acc + (price != null ? price * Number(p.quantity || 0) : 0)
+              }, 0)
+              .toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          </div>
         </div>
       )}
 
       {!loading && payments.length > 0 && (
         <div className="contact-section" style={{ marginTop: 16 }}>
-          <div className="contact-section-header"><span>Pagamentos</span></div>
+          <div className="contact-section-header os-section-title"><span>Pagamentos</span></div>
           <table className="services-table">
             <thead>
               <tr>
@@ -902,6 +1027,8 @@ function ServiceOrderDetailFull({ data }) {
         </div>
       )}
       {wppOpen && <WppSendModal order={data} onClose={() => setWppOpen(false)} />}
+      </>
+      )}
     </div>
   )
 }
@@ -963,9 +1090,344 @@ function toDatetimeLocal(value) {
 }
 
 function nowLocalISO() {
-  const d = new Date()
+  const d = serverNow()
   const pad = n => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// ── Inline line editors (products / services) ────────────────────
+// Each section is a list of editable lines plus one blank line at the end.
+// A line is committed (saved to the API for existing orders, kept locally for a
+// new OS) when focus leaves it — see ProductLineRow / ServiceLineRow.
+const brl = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const toNum = v => (v !== '' && v != null ? Number(v) : null)
+const norm = v => (v == null ? '' : String(v))
+const fmtPrice = v => (v != null && v !== '' ? Number(v).toFixed(2) : '')
+const priceKey = v => (v == null || v === '' ? '' : String(Number(v)))
+
+// Unit price of a product line: the price saved on the OS line (SERVICE_ORDER_PRODUCTS.SALES_PRICE),
+// falling back to the stock price for lines that never had one.
+function lineUnitPrice(p, inv) {
+  const v = p.sales_price != null && p.sales_price !== '' ? p.sales_price : inv?.sales_price
+  return v != null && v !== '' ? Number(v) : null
+}
+
+// Text input with the dd/mm/aaaa hh:mm mask plus a calendar button that opens the native date/time picker.
+function DateTimeField({ name, display, onTextChange, value, onPick }) {
+  const pickerRef = useRef(null)
+  return (
+    <div className="date-picker-wrapper">
+      <input type="text" name={name} value={display} onChange={onTextChange} placeholder="dd/mm/aaaa hh:mm" maxLength={16} />
+      <input
+        type="datetime-local"
+        ref={pickerRef}
+        className="hidden-date-picker"
+        tabIndex={-1}
+        value={value || ''}
+        onChange={e => onPick(e.target.value)}
+      />
+      <button type="button" className="btn-calendar" title="Escolher data e hora"
+        onClick={() => pickerRef.current?.showPicker?.()}>📅</button>
+    </div>
+  )
+}
+
+function TrashIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  )
+}
+
+function inventoryLabel(i, makes) {
+  const maker = i.id_make ? (makes.find(m => m.id_make === i.id_make)?.name ?? '') : ''
+  const parts = [i.name, maker].filter(Boolean).join(' · ')
+  const qty = i.current_quantity != null ? ` (Estoque: ${i.current_quantity})` : ''
+  return parts + (i.code ? ` [${i.code}]` : '') + qty
+}
+
+function findInventoryByName(items, name) {
+  const n = (name ?? '').trim().toLowerCase()
+  return n ? items.find(i => (i.name ?? '').trim().toLowerCase() === n) ?? null : null
+}
+
+// Enter moves to the next field (and, after the last one, to the next line)
+// instead of submitting the whole OS form.
+function lineKeyDown(e) {
+  if (e.key !== 'Enter') return
+  e.preventDefault()
+  const sel = 'input:not([disabled]):not([readonly]), select'
+  const fields = [...e.currentTarget.querySelectorAll(sel)]
+  const next = fields[fields.indexOf(e.target) + 1]
+  if (next) { next.focus(); return }
+  const nextInput = e.currentTarget.nextElementSibling?.querySelector(sel)
+  if (nextInput) nextInput.focus()
+  else e.target.blur()
+}
+
+// Tab on the last field of the last line adds a new blank line (focus then lands on it).
+function lineTabAdd(e, isLast, onAddBlank) {
+  if (e.key !== 'Tab' || e.shiftKey || !isLast || !onAddBlank) return
+  const fields = [...e.currentTarget.querySelectorAll('input:not([disabled]):not([readonly]), select')]
+  if (e.target === fields[fields.length - 1]) onAddBlank()
+}
+
+// Commit the line only when focus actually leaves it (not when moving between its fields).
+function onLineBlur(e, commit) {
+  if (e.currentTarget.contains(e.relatedTarget)) return
+  commit()
+}
+
+function ProductNameInput({ value, onChange, onPick, items, makes }) {
+  const [open, setOpen] = useState(false)
+  const [style, setStyle] = useState({})
+  const ref = useRef(null)
+  const q = value.trim()
+  const matches = (q ? items.filter(i => matchesSearchQuery(inventoryLabel(i, makes), q)) : items).slice(0, 15)
+
+  function show() {
+    if (!ref.current) return
+    const r = ref.current.getBoundingClientRect()
+    setStyle({ position: 'fixed', top: r.bottom + 2, left: r.left, width: Math.max(r.width, 340), zIndex: 9999 })
+    setOpen(true)
+  }
+
+  return (
+    <div className="autocomplete-wrapper">
+      <input
+        ref={ref}
+        type="text"
+        value={value}
+        placeholder="Digite o produto..."
+        autoComplete="off"
+        onChange={e => { onChange(e.target.value); show() }}
+        onFocus={show}
+        onBlur={() => setOpen(false)}
+      />
+      {open && matches.length > 0 && createPortal(
+        <ul className="autocomplete-list" style={style}>
+          {matches.map(i => (
+            <li key={i.id_product} onMouseDown={e => { e.preventDefault(); setOpen(false); onPick(i) }}>
+              <span className="autocomplete-name">{inventoryLabel(i, makes)}</span>
+            </li>
+          ))}
+        </ul>,
+        document.body
+      )}
+    </div>
+  )
+}
+
+function ProductLineRow({ row, index, lineKey, inventoryItems, inventoryReady, productMakes, isTecnico, isLast, onAddBlank, onRemoveBlank, onBlankSaved, onCommit, onResolve, onDelete }) {
+  const inv = row ? inventoryItems.find(i => i.id_product === Number(row.id_product)) : null
+  const emptyVals = { id_product: '', name: '', quantity: '', cost_price: '', sales_price: '' }
+  const baseVals = () => row
+    ? { id_product: row.id_product ?? '', name: row.product_name ?? inv?.name ?? '', quantity: row.quantity ?? '', cost_price: fmtPrice(row.cost_price ?? inv?.cost_price), sales_price: fmtPrice(row.sales_price ?? inv?.sales_price) }
+    : emptyVals
+  const [vals, setVals] = useState(baseVals)
+  const [error, setError] = useState(null)
+  const busyRef = useRef(false)
+
+  useEffect(() => { setVals(baseVals()) }, [row, inv?.name])
+
+  // The unit price belongs to the line (saved in SERVICE_ORDER_PRODUCTS.SALES_PRICE); picking a
+  // product pre-fills it with the stock price, and it can be changed freely.
+  const matched = (vals.id_product !== '' && inventoryItems.find(i => i.id_product === Number(vals.id_product)))
+    || findInventoryByName(inventoryItems, vals.name)
+  const unitPrice = vals.sales_price
+  const lineTotal = Number(unitPrice || 0) * Number(vals.quantity || 0)
+  const isEmpty = !vals.name.trim() && vals.quantity === '' && vals.cost_price === '' && vals.sales_price === ''
+  // until the stock list is loaded a saved line can't be matched to its product, so never treat it as edited
+  const rowProductId = row?.id_product != null ? Number(row.id_product) : null
+  const dirty = !inventoryReady ? false : row
+    ? ((matched?.id_product ?? null) !== rowProductId
+        || norm(vals.quantity) !== norm(row.quantity)
+        || priceKey(vals.sales_price) !== priceKey(row.sales_price ?? inv?.sales_price)
+        || priceKey(vals.cost_price) !== priceKey(row.cost_price ?? inv?.cost_price)
+        || (!matched && vals.name.trim() !== norm(row.product_name)))
+    : !isEmpty
+
+  async function commit() {
+    if (busyRef.current) return
+    if (!dirty) { onResolve(lineKey); setError(null); return }
+    busyRef.current = true
+    const res = await onCommit(lineKey, row, { ...vals, id_product: matched?.id_product ?? '' })
+    busyRef.current = false
+    setError(res?.error ?? null)
+    if (!res?.error && !row) onBlankSaved()
+  }
+
+  function remove() {
+    onResolve(lineKey)
+    if (row) onDelete(row)
+    else onRemoveBlank()
+  }
+
+  return (
+    <div className={`line-row${isTecnico ? ' no-price' : ' product-line'}`} onBlur={e => onLineBlur(e, commit)}
+      onKeyDown={e => { lineKeyDown(e); lineTabAdd(e, isLast, onAddBlank) }}>
+      <span className="line-index">{index}</span>
+      <ProductNameInput
+        value={vals.name}
+        onChange={name => setVals(v => {
+          const m = findInventoryByName(inventoryItems, name)
+          return { ...v, name, id_product: m?.id_product ?? '', cost_price: m ? fmtPrice(m.cost_price) : (v.id_product !== '' ? '' : v.cost_price), sales_price: m ? fmtPrice(m.sales_price) : (v.id_product !== '' ? '' : v.sales_price) }
+        })}
+        onPick={i => setVals(v => ({ ...v, id_product: i.id_product, name: i.name ?? '', cost_price: fmtPrice(i.cost_price), sales_price: fmtPrice(i.sales_price) }))}
+        items={inventoryItems}
+        makes={productMakes}
+      />
+      <input
+        type="number" min="0.001" step="any" value={vals.quantity}
+        onChange={e => setVals(v => ({ ...v, quantity: e.target.value }))}
+      />
+      {!isTecnico && (
+        <input
+          type="number" min="0" step="0.01" value={vals.cost_price}
+          title="Valor de custo desta OS"
+          onChange={e => setVals(v => ({ ...v, cost_price: e.target.value }))}
+        />
+      )}
+      {!isTecnico && (
+        <input
+          type="number" min="0" step="0.01" value={unitPrice}
+          title="Valor unitário desta OS"
+          onChange={e => setVals(v => ({ ...v, sales_price: e.target.value }))}
+        />
+      )}
+      {!isTecnico && <input type="text" readOnly tabIndex={-1} value={lineTotal ? brl(lineTotal) : ''} />}
+      <button type="button" className="line-delete" title="Excluir linha" tabIndex={-1}
+        onMouseDown={e => e.preventDefault()} onClick={remove}><TrashIcon /></button>
+      {vals.name.trim() && !matched && !error && (
+        <div className="line-hint">Produto não encontrado no estoque — será cadastrado no estoque ao salvar a OS.</div>
+      )}
+      {row && inv?.current_quantity != null && !error && (
+        <div className="line-hint">Estoque: {inv.current_quantity}</div>
+      )}
+      {error && <div className="line-error">{error}</div>}
+    </div>
+  )
+}
+
+const SVC_STATUS_COLORS = {
+  0: { bg: '#374151', color: '#9ca3af' },
+  1: { bg: '#555965', color: '#e0e0e0' },
+  2: { bg: '#b89a00', color: '#1a1a1a' },
+  3: { bg: '#3a6ea8', color: '#fff'    },
+  4: { bg: '#a0611a', color: '#fff'    },
+  5: { bg: '#27863f', color: '#fff'    },
+  6: { bg: '#7f1d1d', color: '#fca5a5' },
+}
+const SVC_STATUS_OPTS = [
+  { value: 0, label: 'Orçamento'        },
+  { value: 1, label: 'Aberta'           },
+  { value: 2, label: 'Andamento'        },
+  { value: 3, label: 'Aguardando Peças' },
+  { value: 4, label: 'Em Teste'         },
+  { value: 5, label: 'Concluído'        },
+  { value: 6, label: 'Não aprovado'     },
+]
+
+function ServiceLineRow({ row, index, lineKey, technicians, myTechId, isTecnico, isLast, onAddBlank, onRemoveBlank, onBlankSaved, onCommit, onResolve, onDelete }) {
+  const emptyVals = { description: '', id_technician: isTecnico ? (myTechId ?? '') : '', hours_quantity: '', unit_value: '', total_value: '', status: 0 }
+  const baseVals = () => row
+    ? {
+        description: row.description ?? '',
+        id_technician: row.id_technician ?? '',
+        hours_quantity: row.hours_quantity ?? '',
+        unit_value: row.unit_value ?? '',
+        total_value: row.total_value ?? '',
+        status: row.status ?? '',
+      }
+    : emptyVals
+  const [vals, setVals] = useState(baseVals)
+  const [error, setError] = useState(null)
+  const busyRef = useRef(false)
+
+  useEffect(() => { setVals(baseVals()) }, [row])
+  // the technician list loads after mount — fill the technician's own id once known
+  useEffect(() => {
+    if (!row && isTecnico && myTechId != null) setVals(v => v.id_technician === '' ? { ...v, id_technician: myTechId } : v)
+  }, [myTechId])
+
+  const fields = ['description', 'id_technician', 'hours_quantity', 'unit_value', 'total_value', 'status']
+  const isEmpty = !vals.description.trim() && vals.hours_quantity === '' && vals.unit_value === '' && vals.total_value === ''
+  const dirty = row ? fields.some(k => norm(vals[k]) !== norm(row[k])) : !isEmpty
+
+  function setField(name, value) {
+    setVals(prev => {
+      const next = { ...prev, [name]: value }
+      if ((name === 'hours_quantity' || name === 'unit_value') && next.hours_quantity !== '' && next.unit_value !== '') {
+        next.total_value = (Number(next.hours_quantity) * Number(next.unit_value)).toFixed(2)
+      }
+      return next
+    })
+  }
+
+  async function commit() {
+    if (busyRef.current) return
+    if (!dirty) { onResolve(lineKey); setError(null); return }
+    busyRef.current = true
+    const res = await onCommit(lineKey, row, vals)
+    busyRef.current = false
+    setError(res?.error ?? null)
+    if (!res?.error && !row) onBlankSaved()
+  }
+
+  function remove() {
+    onResolve(lineKey)
+    if (row) onDelete(row)
+    else onRemoveBlank()
+  }
+
+  const sc = SVC_STATUS_COLORS[vals.status] ?? {}
+  return (
+    <div className={`line-row service-line${isTecnico ? ' no-price' : ''}`} onBlur={e => onLineBlur(e, commit)}
+      onKeyDown={e => { lineKeyDown(e); lineTabAdd(e, isLast, onAddBlank) }}>
+      <span className="line-index">{index}</span>
+      <input type="text" value={vals.description} placeholder="Digite o serviço..."
+        onChange={e => setField('description', e.target.value)} />
+      {isTecnico ? (
+        <input type="text" readOnly tabIndex={-1} value={technicians.find(t => t.id_technician === Number(myTechId))?.name ?? ''} />
+      ) : (
+        <SelectAutocomplete
+          items={technicians}
+          value={vals.id_technician}
+          onChange={val => setField('id_technician', val)}
+          getId={t => t.id_technician}
+          getLabel={t => t.name ?? ''}
+          placeholder="Técnico"
+        />
+      )}
+      <input type="number" min="0" step="any" value={vals.hours_quantity}
+        onChange={e => setField('hours_quantity', e.target.value)} />
+      {!isTecnico && <input type="number" min="0" step="0.01" value={vals.unit_value}
+        onChange={e => setField('unit_value', e.target.value)} />}
+      {!isTecnico && <input type="number" min="0" step="0.01" value={vals.total_value}
+        onChange={e => setField('total_value', e.target.value)} />}
+      <select
+        value={vals.status}
+        onChange={e => setField('status', e.target.value !== '' ? Number(e.target.value) : '')}
+        style={{ background: sc.bg ?? '#2a2a2a', color: sc.color ?? '#ccc', fontWeight: 600 }}
+      >
+        <option value="">— Status —</option>
+        {SVC_STATUS_OPTS.map(opt => (
+          <option key={opt.value} value={opt.value}
+            style={{ background: SVC_STATUS_COLORS[opt.value]?.bg ?? '#1a1a1a', color: SVC_STATUS_COLORS[opt.value]?.color ?? '#ccc' }}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <button type="button" className="line-delete" title="Excluir linha" tabIndex={-1}
+        onMouseDown={e => e.preventDefault()} onClick={remove}><TrashIcon /></button>
+      {error && <div className="line-error">{error}</div>}
+    </div>
+  )
 }
 
 export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
@@ -1002,6 +1464,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
       id_technician: initialData?.id_technician ?? '',
       customer_notes: initialData?.customer_notes ?? '',
       internal_notes: initialData?.internal_notes ?? '',
+      remarks: initialData?.remarks ?? '',
       diagnosis_notes: initialData?.diagnosis_notes ?? '',
       odometer_reading: initialData?.odometer_reading ?? '',
       discount: initialData?.discount ?? '',
@@ -1024,36 +1487,79 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
   }
 
   const [draftDismissed, setDraftDismissed] = useState(false)
-  const [form, setForm] = useState(() => draft?.form ?? defaultForm())
-  const [dateTimeInDisplay, setDateTimeInDisplay] = useState(() => draft?.dateTimeInDisplay ?? defaultDateTimeInDisplay())
+  // A restored draft of a NEW OS must not bring back the entry date/time it was started with
+  // (it could be days old) — entry is "now", as for a fresh OS. Edits keep their saved value.
+  const resetEntryDate = !isEdit && !!draft
+  const [form, setForm] = useState(() => draft?.form
+    ? { ...draft.form, ...(resetEntryDate ? { date_time_in: toDatetimeLocal(nowLocalISO()) } : {}) }
+    : defaultForm())
+  const [dateTimeInDisplay, setDateTimeInDisplay] = useState(() =>
+    resetEntryDate ? defaultDateTimeInDisplay() : (draft?.dateTimeInDisplay ?? defaultDateTimeInDisplay()))
   const [estimatedDeliveryDisplay, setEstimatedDeliveryDisplay] = useState(() => draft?.estimatedDeliveryDisplay ?? defaultEstimatedDeliveryDisplay())
   const [customers, setCustomers] = useState([])
   const [allModels, setAllModels] = useState([])
   const [technicians, setTechnicians] = useState([])
+  const myTechId = isTecnico && myUserId ? (technicians.find(t => t.id_user === myUserId)?.id_technician ?? null) : null
   const [newCustomerOpen, setNewCustomerOpen] = useState(false)
   const [newCarOpen, setNewCarOpen] = useState(false)
+  const [newTechnicianOpen, setNewTechnicianOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [discountFocused, setDiscountFocused] = useState(false)
 
+  // Chassi (VIN) lives on CUSTOMER_MODEL: edited here, written to the selected vehicle on save.
+  // null = untouched (shows the vehicle's current VIN).
+  const [vinEdit, setVinEdit] = useState(null)
+  useEffect(() => { setVinEdit(null) }, [form.id_customer_model])
+
   // ── Services panel ────────────────────────────────────────────
-  const emptyServiceForm = { code: '', description: '', hours_quantity: '', unit_value: '', total_value: '', id_technician: '', status: 0 }
   const [orderServices, setOrderServices] = useState(() => (!isEdit && draft?.orderServices) || [])
-  const [editingService, setEditingService] = useState(null)
-  const [serviceForm, setServiceForm] = useState(emptyServiceForm)
-  const [serviceSaving, setServiceSaving] = useState(false)
-  const [serviceError, setServiceError] = useState(null)
+  const orderServicesRef = useRef(orderServices)
 
   // ── Products panel ────────────────────────────────────────────
-  const emptyProductForm = { id_product: '', quantity: '' }
   const [inventoryItems, setInventoryItems] = useState([])
+  const [inventoryReady, setInventoryReady] = useState(false)
+  const inventoryRef = useRef(inventoryItems)
+  inventoryRef.current = inventoryItems
   const [productMakes, setProductMakes] = useState([])
   const [orderProducts, setOrderProducts] = useState(() => (!isEdit && draft?.orderProducts) || [])
-  const [editingProduct, setEditingProduct] = useState(null)
-  const [productForm, setProductForm] = useState(emptyProductForm)
-  const [productSaving, setProductSaving] = useState(false)
+  const orderProductsRef = useRef(orderProducts)
   const [productError, setProductError] = useState(null)
-  const [newProductOpen, setNewProductOpen] = useState(false)
+
+  // Lines are committed asynchronously when focus leaves them. Saving the OS waits for any
+  // commit still in flight, and refuses to save while a line is rejected (pendingLines).
+  // Blank (not yet filled) lines per section: one by default, more via Tab, removable with the trash.
+  const blankSeq = useRef(1)
+  const [blankProducts, setBlankProducts] = useState([1])
+  const [blankServices, setBlankServices] = useState([1])
+  const addBlank = setter => setter(prev => [...prev, ++blankSeq.current])
+  const removeBlank = (setter, id) => setter(prev => prev.filter(x => x !== id))
+  const blankSaved = (setter, id) => setter(prev => {
+    const rest = prev.filter(x => x !== id)
+    return rest.length ? rest : [++blankSeq.current]
+  })
+  const pendingCommits = useRef(new Set())
+  const failedLines = useRef(new Set())
+
+  // The refs mirror the state synchronously so commits and saveOrder never read a stale list.
+  function updateOrderProducts(fn) {
+    orderProductsRef.current = fn(orderProductsRef.current)
+    setOrderProducts(orderProductsRef.current)
+  }
+  function updateOrderServices(fn) {
+    orderServicesRef.current = fn(orderServicesRef.current)
+    setOrderServices(orderServicesRef.current)
+  }
+  function trackCommit(promise) {
+    const done = () => pendingCommits.current.delete(promise)
+    pendingCommits.current.add(promise)
+    promise.then(done, done)
+    return promise
+  }
+  async function waitForPendingCommits() {
+    while (pendingCommits.current.size) await Promise.allSettled([...pendingCommits.current])
+  }
+  function resolveLine(key) { failedLines.current.delete(key) }
 
   // ── Payments panel ────────────────────────────────────────────
   const emptyPaymentForm = { id_payment_method: '', due_date: '', payment_date: '', value: '', installments: 1 }
@@ -1066,9 +1572,9 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
 
   function addMonths(isoDate, months) {
     if (!isoDate) {
-      const d = new Date()
+      const d = serverNow()
       d.setMonth(d.getMonth() + months)
-      return d.toISOString().slice(0, 10)
+      return localISODate(d)
     }
     const d = new Date(isoDate + 'T12:00:00')
     d.setMonth(d.getMonth() + months)
@@ -1126,22 +1632,19 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
         if (m?.id_customer) setForm(prev => ({ ...prev, id_customer: m.id_customer }))
       }
     }).catch(() => {})
-    fetchAllTechnician().then(data => {
-      setTechnicians(data ?? [])
-      if (isTecnico && myUserId) {
-        const myTech = (data ?? []).find(t => t.id_user === myUserId)
-        if (myTech) setServiceForm(prev => ({ ...prev, id_technician: myTech.id_technician }))
-      }
-    }).catch(() => {})
-    fetchAllInventory().then(data => setInventoryItems((data ?? []).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'pt-BR', { sensitivity: 'base' })))).catch(() => {})
+    fetchAllTechnician().then(data => setTechnicians(data ?? [])).catch(() => {})
+    fetchAllInventory()
+      .then(data => setInventoryItems((data ?? []).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'pt-BR', { sensitivity: 'base' }))))
+      .then(() => setInventoryReady(true))
+      .catch(() => {})
     fetchAllVehicleMake().then(data => setProductMakes(data ?? [])).catch(() => {})
     fetchAllPaymentMethod().then(data => setPaymentMethods(data ?? [])).catch(() => {})
     if (isEdit) {
       fetchAllServices()
-        .then(all => setOrderServices(all.filter(s => s.id_order === initialData.id_order)))
+        .then(all => updateOrderServices(() => all.filter(s => s.id_order === initialData.id_order)))
         .catch(() => {})
       fetchServiceOrderProductsByOrder(initialData.id_order)
-        .then(data => setOrderProducts(data ?? []))
+        .then(data => updateOrderProducts(() => data ?? []))
         .catch(err => setProductError('Erro ao carregar produtos: ' + err.message))
       fetchPaymentsByOrder(initialData.id_order)
         .then(data => setOrderPayments(data ?? []))
@@ -1149,73 +1652,51 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
     }
   }, [])
 
-  function openNewService() {
-    setServiceForm(emptyServiceForm)
-    setEditingService({})
-    setServiceError(null)
-  }
-
-  function openEditService(s) {
-    setServiceForm({
-      code: s.code ?? '',
-      description: s.description ?? '',
-      hours_quantity: s.hours_quantity ?? '',
-      unit_value: s.unit_value ?? '',
-      total_value: s.total_value ?? '',
-      id_technician: s.id_technician ?? '',
-      status: s.status ?? '',
-    })
-    setEditingService(s)
-    setServiceError(null)
-  }
-
-  function handleServiceChange(e) {
-    const { name, value } = e.target
-    setServiceForm(prev => {
-      const next = { ...prev, [name]: value }
-      if ((name === 'hours_quantity' || name === 'unit_value') && next.hours_quantity !== '' && next.unit_value !== '') {
-        next.total_value = (Number(next.hours_quantity) * Number(next.unit_value)).toFixed(2)
+  // ── Inline lines: commit / delete ─────────────────────────────
+  // Called when focus leaves a line. Returns { error } when the line was rejected
+  // (it stays on screen with the message), otherwise {}.
+  function commitServiceLine(lineKey, row, vals) {
+    return trackCommit((async () => {
+      if (!vals.description.trim()) {
+        failedLines.current.add(lineKey)
+        return { error: 'Informe a descrição do serviço.' }
       }
-      return next
-    })
-  }
-
-  function buildServicePayload(idOrder) {
-    return {
-      code: serviceForm.code || null,
-      description: serviceForm.description || null,
-      hours_quantity: serviceForm.hours_quantity !== '' ? Number(serviceForm.hours_quantity) : null,
-      unit_value: serviceForm.unit_value !== '' ? Number(serviceForm.unit_value) : null,
-      total_value: serviceForm.total_value !== '' ? Number(serviceForm.total_value) : null,
-      id_order: idOrder ? Number(idOrder) : null,
-      id_technician: serviceForm.id_technician !== '' ? Number(serviceForm.id_technician) : null,
-      status: serviceForm.status !== '' ? Number(serviceForm.status) : null,
-    }
-  }
-
-  async function handleServiceSave() {
-    setServiceSaving(true)
-    setServiceError(null)
-    try {
-      const techName = technicians.find(t => t.id_technician === Number(serviceForm.id_technician))?.name ?? null
-      if (editingService.id_service) {
-        const payload = buildServicePayload(initialData.id_order)
-        await updateServices(editingService.id_service, payload)
-        setOrderServices(prev => prev.map(s => s.id_service === editingService.id_service
-          ? { ...s, ...payload, id_service: s.id_service, technician_name: techName }
-          : s))
-      } else if (isEdit) {
-        const created = await createServices(buildServicePayload(initialData.id_order))
-        setOrderServices(prev => [...prev, { ...created, technician_name: techName }])
-      } else {
-        setOrderServices(prev => [...prev, { ...serviceForm, technician_name: techName, _tempId: Date.now() }])
+      const idTech = isTecnico ? myTechId : vals.id_technician
+      const techName = technicians.find(t => t.id_technician === Number(idTech))?.name ?? null
+      const payload = {
+        code: row?.code || null,
+        description: vals.description.trim(),
+        hours_quantity: toNum(vals.hours_quantity),
+        unit_value: toNum(vals.unit_value),
+        total_value: toNum(vals.total_value),
+        id_order: isEdit ? Number(orderId) : null,
+        id_technician: toNum(idTech),
+        status: toNum(vals.status),
       }
-      setEditingService(null)
-    } catch (err) {
-      setServiceError(err.message)
-    } finally {
-      setServiceSaving(false)
-    }
+      try {
+        if (row?.id_service) {
+          await updateServices(row.id_service, payload)
+          updateOrderServices(prev => prev.map(s => s.id_service === row.id_service
+            ? { ...s, ...payload, id_service: s.id_service, technician_name: techName }
+            : s))
+        } else if (isEdit) {
+          const created = await createServices(payload)
+          updateOrderServices(prev => [...prev, { ...created, technician_name: techName }])
+        } else {
+          const local = {
+            code: '', description: payload.description, hours_quantity: vals.hours_quantity,
+            unit_value: vals.unit_value, total_value: vals.total_value, id_technician: idTech ?? '',
+            status: vals.status, technician_name: techName, _tempId: row?._tempId ?? Date.now(),
+          }
+          updateOrderServices(prev => row?._tempId ? prev.map(s => s._tempId === row._tempId ? local : s) : [...prev, local])
+        }
+        failedLines.current.delete(lineKey)
+        return {}
+      } catch (err) {
+        failedLines.current.add(lineKey)
+        return { error: err.message }
+      }
+    })())
   }
 
   async function handleServiceDelete(s) {
@@ -1223,77 +1704,102 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
     if (s.id_service) {
       try {
         await deleteServices(s.id_service)
-        setOrderServices(prev => prev.filter(x => x.id_service !== s.id_service))
+        updateOrderServices(prev => prev.filter(x => x.id_service !== s.id_service))
       } catch (err) {
         alert('Erro ao excluir: ' + err.message)
       }
     } else {
-      setOrderServices(prev => prev.filter(x => x._tempId !== s._tempId))
+      updateOrderServices(prev => prev.filter(x => x._tempId !== s._tempId))
     }
   }
 
-  function openNewProduct() {
-    setProductForm(emptyProductForm)
-    setEditingProduct({})
-    setProductError(null)
-  }
+  // A product typed on a line that isn't in stock stays on the line (id_product null) and
+  // is registered in stock when the OS is saved — see registerPendingProducts.
+  function commitProductLine(lineKey, row, vals) {
+    return trackCommit((async () => {
+      const fail = error => { failedLines.current.add(lineKey); return { error } }
+      const name = vals.name.trim()
+      if (!name) return fail('Informe o produto.')
+      if (!inventoryReady) return fail('Aguarde o carregamento do estoque e tente novamente.')
+      const qty = Number(vals.quantity)
+      if (!(qty > 0)) return fail('Informe a quantidade.')
+      try {
+        let inv = vals.id_product !== '' ? inventoryRef.current.find(i => i.id_product === Number(vals.id_product)) : null
+        inv = inv ?? findInventoryByName(inventoryRef.current, name)
+        const typedPrice = vals.sales_price !== '' && vals.sales_price != null ? Number(vals.sales_price) : null
+        const typedCost = vals.cost_price !== '' && vals.cost_price != null ? Number(vals.cost_price) : null
 
-  function openEditProduct(p) {
-    setProductForm({
-      id_product: p.id_product ?? '',
-      quantity: p.quantity ?? '',
-    })
-    setEditingProduct(p)
-    setProductError(null)
-  }
+        if (!inv) {
+          const price = typedPrice
+          const local = { id_product: null, product_name: name, quantity: qty, cost_price: typedCost, sales_price: price, _tempId: row?._tempId ?? Date.now() }
+          if (row?.id_service_order_product) {
+            // a saved line switched to a product that isn't in stock: drop it, the new line is created on save
+            await deleteServiceOrderProduct(row.id_service_order_product)
+            updateOrderProducts(prev => [...prev.filter(p => p.id_service_order_product !== row.id_service_order_product), local])
+          } else {
+            updateOrderProducts(prev => row?._tempId ? prev.map(p => p._tempId === row._tempId ? local : p) : [...prev, local])
+          }
+          failedLines.current.delete(lineKey)
+          return {}
+        }
 
-  function handleProductChange(e) {
-    const { name, value } = e.target
-    setProductForm(prev => ({ ...prev, [name]: value }))
-  }
-
-  function buildProductPayload(idOrder) {
-    return {
-      id_order: idOrder ? Number(idOrder) : null,
-      id_product: productForm.id_product !== '' ? Number(productForm.id_product) : null,
-      quantity: productForm.quantity !== '' ? Number(productForm.quantity) : null,
-    }
-  }
-
-  async function handleProductSave() {
-    if (!productForm.id_product || !productForm.quantity) {
-      setProductError('Selecione o produto e informe a quantidade.')
-      return
-    }
-    const inv = inventoryItems.find(i => i.id_product === Number(productForm.id_product))
-    if (inv?.current_quantity != null && Number(productForm.quantity) > inv.current_quantity) {
-      const confirmed = window.confirm(
-        `Estoque atual de "${inv.name}": ${inv.current_quantity}. Essa quantidade deixará o estoque negativo. Deseja continuar?`
-      )
-      if (!confirmed) return
-    }
-    setProductSaving(true)
-    setProductError(null)
-    try {
-      if (editingProduct.id_service_order_product) {
-        const payload = buildProductPayload(initialData.id_order)
-        const updated = await updateServiceOrderProduct(editingProduct.id_service_order_product, payload)
-        setOrderProducts(prev => prev.map(p =>
-          p.id_service_order_product === editingProduct.id_service_order_product ? { ...updated } : p
-        ))
-      } else if (isEdit) {
-        const created = await createServiceOrderProduct(buildProductPayload(initialData.id_order))
-        const inv = inventoryItems.find(i => i.id_product === created.id_product)
-        setOrderProducts(prev => [...prev, { ...created, product_name: inv?.name ?? null }])
-      } else {
-        const inv = inventoryItems.find(i => i.id_product === Number(productForm.id_product))
-        setOrderProducts(prev => [...prev, { ...productForm, product_name: inv?.name ?? null, _tempId: Date.now() }])
+        const changedProduct = !row || Number(row.id_product) !== inv.id_product || Number(row.quantity) !== qty
+        if (changedProduct && inv.current_quantity != null && qty > inv.current_quantity) {
+          const ok = window.confirm(
+            `Estoque atual de "${inv.name}": ${inv.current_quantity}. Essa quantidade deixará o estoque negativo. Deseja continuar?`
+          )
+          if (!ok) return fail('Quantidade acima do estoque — confirme ou ajuste a quantidade.')
+        }
+        const payload = {
+          id_order: isEdit ? Number(orderId) : null,
+          id_product: inv.id_product,
+          quantity: qty,
+          cost_price: typedCost ?? (inv.cost_price != null ? Number(inv.cost_price) : null),
+          sales_price: typedPrice ?? (inv.sales_price != null ? Number(inv.sales_price) : null),
+        }
+        if (row?.id_service_order_product) {
+          const updated = await updateServiceOrderProduct(row.id_service_order_product, payload)
+          updateOrderProducts(prev => prev.map(p =>
+            p.id_service_order_product === row.id_service_order_product ? { ...updated, product_name: inv.name } : p))
+        } else if (isEdit) {
+          const created = await createServiceOrderProduct(payload)
+          const saved = { ...created, product_name: inv.name }
+          updateOrderProducts(prev => row?._tempId ? prev.map(p => p._tempId === row._tempId ? saved : p) : [...prev, saved])
+        } else {
+          const local = { id_product: inv.id_product, quantity: qty, cost_price: payload.cost_price, sales_price: payload.sales_price, product_name: inv.name, _tempId: row?._tempId ?? Date.now() }
+          updateOrderProducts(prev => row?._tempId ? prev.map(p => p._tempId === row._tempId ? local : p) : [...prev, local])
+        }
+        failedLines.current.delete(lineKey)
+        return {}
+      } catch (err) {
+        return fail(err.message)
       }
-      setEditingProduct(null)
-    } catch (err) {
-      setProductError(err.message)
-    } finally {
-      setProductSaving(false)
+    })())
+  }
+
+  // On OS save: register in stock every product typed on a line that wasn't there. In an
+  // existing OS the line is also created now (it needs the new id_product); in a new OS the
+  // id just gets filled in and the lines are created together with the order.
+  async function registerPendingProducts() {
+    for (const row of orderProductsRef.current.filter(p => p.id_product == null && p._tempId)) {
+      let inv = findInventoryByName(inventoryRef.current, row.product_name)
+      if (!inv) {
+        inv = await createInventory({ name: row.product_name, cost_price: row.cost_price ?? null, sales_price: row.sales_price ?? null, current_quantity: 0, product_size: '' })
+        inventoryRef.current = [...inventoryRef.current, inv]
+        setInventoryItems(inventoryRef.current)
+      }
+      if (isEdit) {
+        const created = await createServiceOrderProduct({
+          id_order: Number(orderId),
+          id_product: inv.id_product,
+          quantity: Number(row.quantity),
+          cost_price: row.cost_price ?? (inv.cost_price != null ? Number(inv.cost_price) : null),
+          sales_price: row.sales_price ?? (inv.sales_price != null ? Number(inv.sales_price) : null),
+        })
+        updateOrderProducts(prev => prev.map(p => p._tempId === row._tempId ? { ...created, product_name: inv.name } : p))
+      } else {
+        updateOrderProducts(prev => prev.map(p => p._tempId === row._tempId ? { ...p, id_product: inv.id_product, product_name: inv.name } : p))
+      }
     }
   }
 
@@ -1302,12 +1808,12 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
     if (p.id_service_order_product) {
       try {
         await deleteServiceOrderProduct(p.id_service_order_product)
-        setOrderProducts(prev => prev.filter(x => x.id_service_order_product !== p.id_service_order_product))
+        updateOrderProducts(prev => prev.filter(x => x.id_service_order_product !== p.id_service_order_product))
       } catch (err) {
         alert('Erro ao excluir: ' + err.message)
       }
     } else {
-      setOrderProducts(prev => prev.filter(x => x._tempId !== p._tempId))
+      updateOrderProducts(prev => prev.filter(x => x._tempId !== p._tempId))
     }
   }
 
@@ -1398,7 +1904,8 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
           const totalServices = orderServices.reduce((acc, s) => Number(s.status) === 6 ? acc : acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
           const totalProducts = orderProducts.reduce((acc, p) => {
             const inv = inventoryItems.find(i => i.id_product === Number(p.id_product))
-            return acc + (inv?.sales_price != null ? Number(inv.sales_price) * Number(p.quantity || 0) : 0)
+            const price = lineUnitPrice(p, inv)
+            return acc + (price != null ? price * Number(p.quantity || 0) : 0)
           }, 0)
           const total = totalServices + totalProducts
           const discount = Number(form.discount) || 0
@@ -1455,9 +1962,15 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
     }
   }
 
-  function handleNewCustomerSaved(created) {
+  function handleNewCustomerSaved(created, createdModels = []) {
+    if (!created) {
+      // Edição: recarrega a lista e mantém o cliente selecionado
+      fetchAllCustomer().then(data => setCustomers((data ?? []).sort((a, b) => customerDisplayName(a).localeCompare(customerDisplayName(b), 'pt-BR', { sensitivity: 'base' })))).catch(() => {})
+      setNewCustomerOpen(false)
+      return
+    }
     setCustomers(prev => [...prev, created].sort((a, b) => customerDisplayName(a).localeCompare(customerDisplayName(b), 'pt-BR', { sensitivity: 'base' })))
-    setForm(prev => ({ ...prev, id_customer: created.id_customer, id_customer_model: '' }))
+    setForm(prev => ({ ...prev, id_customer: created.id_customer, id_customer_model: createdModels[0]?.id_customer_model ?? '' }))
     setNewCustomerOpen(false)
     fetchAllCustomerModel().then(data => setAllModels(data ?? [])).catch(() => {})
   }
@@ -1471,8 +1984,26 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
     setNewCarOpen(false)
   }
 
+  async function handleNewTechnicianSaved(created) {
+    try {
+      const fresh = await fetchAllTechnician()
+      setTechnicians(fresh ?? [])
+    } catch {}
+    setForm(prev => ({ ...prev, id_technician: created.id_technician }))
+    setNewTechnicianOpen(false)
+  }
+
   function handleChange(e) {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+  }
+
+  // value comes from the native picker as yyyy-mm-ddThh:mm
+  function pickDateTime(field, setDisplay, value) {
+    if (!value) return
+    setForm(prev => ({ ...prev, [field]: value }))
+    const [date, time] = value.split('T')
+    const [y, m, d] = date.split('-')
+    setDisplay(`${d}/${m}/${y} ${(time ?? '00:00').slice(0, 5)}`)
   }
 
   function handleDateTimeInChange(e) {
@@ -1494,6 +2025,13 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
       const day = digits.slice(0, 2), month = digits.slice(2, 4), year = digits.slice(4, 8)
       const hh = digits.slice(8, 10), mm = digits.slice(10, 12)
       setForm(prev => ({ ...prev, date_time_in: `${year}-${month}-${day}T${hh}:${mm}` }))
+    } else if (digits.length === 8) {
+      // Full date typed but no time — the display already looks complete
+      // (e.g. "05/03/2023"), so silently dropping the value here instead of
+      // defaulting the time would save a blank date_time_in without any
+      // indication something's missing.
+      const day = digits.slice(0, 2), month = digits.slice(2, 4), year = digits.slice(4, 8)
+      setForm(prev => ({ ...prev, date_time_in: `${year}-${month}-${day}T00:00` }))
     } else {
       setForm(prev => ({ ...prev, date_time_in: '' }))
     }
@@ -1518,6 +2056,9 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
       const day = digits.slice(0, 2), month = digits.slice(2, 4), year = digits.slice(4, 8)
       const hh = digits.slice(8, 10), mm = digits.slice(10, 12)
       setForm(prev => ({ ...prev, estimated_delivery_at: `${year}-${month}-${day}T${hh}:${mm}` }))
+    } else if (digits.length === 8) {
+      const day = digits.slice(0, 2), month = digits.slice(2, 4), year = digits.slice(4, 8)
+      setForm(prev => ({ ...prev, estimated_delivery_at: `${year}-${month}-${day}T00:00` }))
     } else {
       setForm(prev => ({ ...prev, estimated_delivery_at: '' }))
     }
@@ -1527,46 +2068,18 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
     setSaving(true)
     setError(null)
     try {
-      // Flush any open sub-editors so unsaved rows are included on main save
-      let pendingServices  = orderServices
-      let pendingProducts  = orderProducts
+      // Lines commit when focus leaves them: wait for any commit still running, and
+      // don't save the OS while a product/service line is rejected (it would be lost).
+      await waitForPendingCommits()
+      if (failedLines.current.size > 0) {
+        setError('Há produtos ou serviços com pendência (veja a mensagem na linha). Corrija ou exclua a linha antes de salvar.')
+        setSaving(false)
+        return
+      }
+      await registerPendingProducts()
+      let pendingServices  = orderServicesRef.current
+      let pendingProducts  = orderProductsRef.current
       let pendingPayments  = orderPayments
-
-      if (editingService !== null) {
-        const techName = technicians.find(t => t.id_technician === Number(serviceForm.id_technician))?.name ?? null
-        if (isEdit) {
-          if (editingService.id_service) {
-            const payload = buildServicePayload(initialData.id_order)
-            await updateServices(editingService.id_service, payload)
-            pendingServices = pendingServices.map(s => s.id_service === editingService.id_service ? { ...s, ...payload, id_service: s.id_service, technician_name: techName } : s)
-          } else {
-            const created = await createServices(buildServicePayload(initialData.id_order))
-            pendingServices = [...pendingServices, { ...created, technician_name: techName }]
-          }
-        } else {
-          pendingServices = [...pendingServices, { ...serviceForm, technician_name: techName, _tempId: Date.now() }]
-        }
-        setOrderServices(pendingServices)
-        setEditingService(null)
-      }
-
-      if (editingProduct !== null && productForm.id_product && productForm.quantity) {
-        const inv = inventoryItems.find(i => i.id_product === Number(productForm.id_product))
-        if (isEdit) {
-          if (editingProduct.id_service_order_product) {
-            const payload = buildProductPayload(initialData.id_order)
-            const updated = await updateServiceOrderProduct(editingProduct.id_service_order_product, payload)
-            pendingProducts = pendingProducts.map(p => p.id_service_order_product === editingProduct.id_service_order_product ? { ...updated } : p)
-          } else {
-            const created = await createServiceOrderProduct(buildProductPayload(initialData.id_order))
-            pendingProducts = [...pendingProducts, { ...created, product_name: inv?.name ?? null }]
-          }
-        } else {
-          pendingProducts = [...pendingProducts, { ...productForm, product_name: inv?.name ?? null, _tempId: Date.now() + 1 }]
-        }
-        setOrderProducts(pendingProducts)
-        setEditingProduct(null)
-      }
 
       if (editingPayment !== null && paymentForm.id_payment_method) {
         const method = paymentMethods.find(m => m.id_payment_method === Number(paymentForm.id_payment_method))
@@ -1586,11 +2099,22 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
         setEditingPayment(null)
       }
 
+      // Persist an edited chassi on the vehicle (CUSTOMER_MODEL.VIN) before saving the order.
+      if (form.id_customer_model !== '' && vinEdit !== null) {
+        const model = allModels.find(m => String(m.id_customer_model) === String(form.id_customer_model))
+        const newVin = vinEdit.trim()
+        if (model && (model.vin ?? '') !== newVin) {
+          await updateCustomerModel(model.id_customer_model, { ...model, vin: newVin || null })
+          setAllModels(prev => prev.map(m => m.id_customer_model === model.id_customer_model ? { ...m, vin: newVin || null } : m))
+        }
+      }
+
       const fmtDatetime = v => v ? v.replace('T', ' ') + (v.length === 16 ? ':00' : '') : null
       const totalServices = pendingServices.reduce((acc, s) => Number(s.status) === 6 ? acc : acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
       const totalProducts = pendingProducts.reduce((acc, p) => {
-        const inv = inventoryItems.find(i => i.id_product === Number(p.id_product))
-        return acc + (inv?.sales_price != null ? Number(inv.sales_price) * Number(p.quantity || 0) : 0)
+        const inv = inventoryRef.current.find(i => i.id_product === Number(p.id_product))
+        const price = lineUnitPrice(p, inv)
+        return acc + (price != null ? price * Number(p.quantity || 0) : 0)
       }, 0)
       const totalAmount = totalServices + totalProducts
       const discount = Number(form.discount) || 0
@@ -1630,6 +2154,8 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
             id_order: created.id_order,
             id_product: p.id_product !== '' ? Number(p.id_product) : null,
             quantity: p.quantity !== '' ? Number(p.quantity) : null,
+            cost_price: p.cost_price !== '' && p.cost_price != null ? Number(p.cost_price) : null,
+            sales_price: p.sales_price !== '' && p.sales_price != null ? Number(p.sales_price) : null,
           })
         }
         for (const p of pendingPayments) {
@@ -1661,7 +2187,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
             } catch (_) { /* best-effort */ }
           }
         }
-        setOrderServices(prev => prev.map(s => ({ ...s, status: 5 })))
+        updateOrderServices(prev => prev.map(s => ({ ...s, status: 5 })))
       }
 
       if (overrideStatus != null) setForm(prev => ({ ...prev, status: overrideStatus }))
@@ -1791,7 +2317,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
               type="button"
               className="btn-add-inline"
               onClick={() => setNewCustomerOpen(true)}
-              title="Cadastrar novo cliente"
+              title={form.id_customer ? 'Editar cliente' : 'Cadastrar novo cliente'}
             >+</button>
           </div>
         </div>
@@ -1827,6 +2353,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
       </div>
       {newCustomerOpen && (
         <NewCustomerModal
+          customer={customers.find(c => c.id_customer === Number(form.id_customer)) ?? null}
           onSaved={handleNewCustomerSaved}
           onCancel={() => setNewCustomerOpen(false)}
         />
@@ -1838,25 +2365,41 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
           onCancel={() => setNewCarOpen(false)}
         />
       )}
+      {newTechnicianOpen && (
+        <NewTechnicianModal
+          onSaved={handleNewTechnicianSaved}
+          onCancel={() => setNewTechnicianOpen(false)}
+        />
+      )}
       <div style={{ display: 'flex', gap: '16px' }}>
         <div className="form-group" style={{ flex: 1 }}>
           <label>Data/Hora de Entrada</label>
-          <input type="text" name="date_time_in" value={dateTimeInDisplay} onChange={handleDateTimeInChange} placeholder="dd/mm/aaaa hh:mm" maxLength={16} />
+          <DateTimeField name="date_time_in" display={dateTimeInDisplay} onTextChange={handleDateTimeInChange}
+            value={form.date_time_in} onPick={v => pickDateTime('date_time_in', setDateTimeInDisplay, v)} />
         </div>
         <div className="form-group" style={{ flex: 1 }}>
           <label>Data/Hora Estimada de Entrega</label>
-          <input type="text" name="estimated_delivery_at" value={estimatedDeliveryDisplay} onChange={handleEstimatedDeliveryChange} placeholder="dd/mm/aaaa hh:mm" maxLength={16} />
+          <DateTimeField name="estimated_delivery_at" display={estimatedDeliveryDisplay} onTextChange={handleEstimatedDeliveryChange}
+            value={form.estimated_delivery_at} onPick={v => pickDateTime('estimated_delivery_at', setEstimatedDeliveryDisplay, v)} />
         </div>
         <div className="form-group" style={{ flex: 1 }}>
           <label>Técnico Responsável</label>
-          <SelectAutocomplete
-            items={technicians.filter(t => t.id_user != null)}
-            value={form.id_technician}
-            onChange={val => setForm(prev => ({ ...prev, id_technician: val }))}
-            getId={t => t.id_user}
-            getLabel={t => t.name}
-            placeholder="Digite o nome do técnico..."
-          />
+          <div className="autocomplete-with-add">
+            <SelectAutocomplete
+              items={technicians}
+              value={form.id_technician}
+              onChange={val => setForm(prev => ({ ...prev, id_technician: val }))}
+              getId={t => t.id_technician}
+              getLabel={t => t.name}
+              placeholder="Digite o nome do técnico..."
+            />
+            <button
+              type="button"
+              className="btn-add-inline"
+              onClick={() => setNewTechnicianOpen(true)}
+              title="Cadastrar novo técnico"
+            >+</button>
+          </div>
         </div>
       </div>
       <div style={{ display: 'flex', gap: '16px' }}>
@@ -1864,8 +2407,11 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
           <label>Chassi (VIN)</label>
           <input
             type="text"
-            value={allModels.find(m => String(m.id_customer_model) === String(form.id_customer_model))?.vin ?? initialData?.vin ?? ''}
-            readOnly
+            value={vinEdit ?? allModels.find(m => String(m.id_customer_model) === String(form.id_customer_model))?.vin ?? initialData?.vin ?? ''}
+            onChange={e => setVinEdit(e.target.value.toUpperCase().replace(/\s/g, ''))}
+            maxLength={17}
+            disabled={form.id_customer_model === ''}
+            placeholder={form.id_customer_model === '' ? 'Selecione o veículo' : ''}
           />
         </div>
         <div className="form-group" style={{ flex: 1 }}>
@@ -1887,319 +2433,168 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
       </div>
       <div className="form-group">
         <label>Observações do Cliente</label>
-        <textarea name="customer_notes" value={form.customer_notes} onChange={handleChange} rows={3} />
+        <textarea name="customer_notes" value={form.customer_notes} onChange={handleChange} rows={3} placeholder="Descreva o que o cliente relatou" />
       </div>
       <div className="form-group">
         <label>Observações Internas</label>
-        <textarea name="internal_notes" value={form.internal_notes} onChange={handleChange} rows={3} />
+        <textarea name="internal_notes" value={form.internal_notes} onChange={handleChange} rows={3} placeholder="Digite aqui informações que NÃO devem ser apresentadas para o cliente (ex.: solicitar entrada, solicitar garantia, não fazer serviço etc.)" />
       </div>
-      <div className="form-group">
-        <label>Diagnóstico</label>
-        <textarea name="diagnosis_notes" value={form.diagnosis_notes} onChange={handleChange} rows={3} />
+      <div style={{ display: 'flex', gap: '16px' }}>
+        <div className="form-group" style={{ flex: 1 }}>
+          <label>Observações Gerais</label>
+          <textarea name="remarks" value={form.remarks} onChange={handleChange} rows={3} maxLength={1200} placeholder="Digite aqui informações gerais (ex.: necessário fazer retífica. Cliente ciente)" />
+        </div>
+        <div className="form-group" style={{ flex: 1 }}>
+          <label>Diagnóstico</label>
+          <textarea name="diagnosis_notes" value={form.diagnosis_notes} onChange={handleChange} rows={3} placeholder="Digite aqui os problemas identificados, serviços a serem feitos" />
+        </div>
       </div>
       {/* ── Services section ─────────────────────────────────── */}
       <div className="contact-section">
-        <div className="contact-section-header">
+        <div className="contact-section-header os-section-title">
           <span>Serviços</span>
-          <button type="button" className="btn-add-contact" onClick={openNewService} disabled={editingService !== null}>
-            + Adicionar
-          </button>
         </div>
 
-        {orderServices.length > 0 && (
-          <table className="services-table">
-            <thead>
-              <tr>
-                <th>Descrição</th>
-                <th>Técnico</th>
-                <th>Horas</th>
-                {!isTecnico && <th>Valor Unit.</th>}
-                {!isTecnico && <th>Total</th>}
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {orderServices.map((s, idx) => {
-                const tech = technicians.find(t => t.id_technician === Number(s.id_technician))
-                const svcStatusColors = {
-                  0: { bg: '#374151', color: '#9ca3af' },
-                  1: { bg: '#555965', color: '#e0e0e0' },
-                  2: { bg: '#b89a00', color: '#1a1a1a' },
-                  3: { bg: '#3a6ea8', color: '#fff'    },
-                  4: { bg: '#a0611a', color: '#fff'    },
-                  5: { bg: '#27863f', color: '#fff'    },
-                  6: { bg: '#7f1d1d', color: '#fca5a5' },
-                }
-                const svcStatusOpts = [
-                  { value: 0, label: 'Orçamento'        },
-                  { value: 1, label: 'Aberta'           },
-                  { value: 2, label: 'Andamento'        },
-                  { value: 3, label: 'Aguardando Peças' },
-                  { value: 4, label: 'Em Teste'         },
-                  { value: 5, label: 'Concluído'        },
-                  { value: 6, label: 'Não aprovado'     },
-                ]
-                const currentStatus = s.status != null ? Number(s.status) : ''
-                const sc = svcStatusColors[currentStatus] ?? {}
-                return (
-                  <tr key={s.id_service ?? s._tempId ?? idx}>
-                    <td>{s.description ?? ''}</td>
-                    <td>{s.technician_name ?? tech?.name ?? ''}</td>
-                    <td>{s.hours_quantity ?? ''}</td>
-                    {!isTecnico && <td>{s.unit_value != null ? Number(s.unit_value).toFixed(2) : ''}</td>}
-                    {!isTecnico && <td>{s.total_value != null ? Number(s.total_value).toFixed(2) : ''}</td>}
-                    <td>
-                      <select
-                        value={currentStatus}
-                        onChange={async e => {
-                          const newStatus = e.target.value !== '' ? Number(e.target.value) : null
-                          const updated = { ...s, status: newStatus }
-                          setOrderServices(prev => prev.map(x => {
-                            if (s.id_service) return x.id_service === s.id_service ? updated : x
-                            return s._tempId && x._tempId === s._tempId ? updated : x
-                          }))
-                          if (s.id_service) {
-                            try {
-                              await updateServices(s.id_service, {
-                                code: s.code || null,
-                                description: s.description || null,
-                                hours_quantity: s.hours_quantity != null ? Number(s.hours_quantity) : null,
-                                unit_value: s.unit_value != null ? Number(s.unit_value) : null,
-                                total_value: s.total_value != null ? Number(s.total_value) : null,
-                                id_order: s.id_order != null ? Number(s.id_order) : null,
-                                id_technician: s.id_technician != null ? Number(s.id_technician) : null,
-                                status: newStatus,
-                              })
-                            } catch (err) {
-                              alert('Erro ao salvar status: ' + err.message)
-                            }
-                          }
-                        }}
-                        style={{
-                          background: sc.bg ?? '#2a2a2a',
-                          color: sc.color ?? '#ccc',
-                          border: 'none',
-                          borderRadius: '6px',
-                          padding: '3px 6px',
-                          fontWeight: 600,
-                          fontSize: '0.78rem',
-                          cursor: 'pointer',
-                          minWidth: '120px',
-                        }}
-                      >
-                        <option value="">— Status —</option>
-                        {svcStatusOpts.map(opt => (
-                          <option key={opt.value} value={opt.value}
-                            style={{ background: svcStatusColors[opt.value]?.bg ?? '#1a1a1a', color: svcStatusColors[opt.value]?.color ?? '#ccc' }}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="actions-col">
-                      <button type="button" className="btn-edit" onClick={() => openEditService(s)}>Editar</button>
-                      <button type="button" className="btn-delete" onClick={() => handleServiceDelete(s)}>Excluir</button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
+        <div className="line-table">
+          <div className={`line-header service-line${isTecnico ? ' no-price' : ''}`}>
+            <span></span>
+            <span>Serviço</span>
+            <span>Técnico</span>
+            <span>Horas</span>
+            {!isTecnico && <span>Valor unit.</span>}
+            {!isTecnico && <span>Valor total</span>}
+            <span>Status</span>
+            <span></span>
+          </div>
+          {orderServices.map((s, idx) => {
+            const key = s.id_service ?? s._tempId ?? idx
+            return (
+              <ServiceLineRow
+                key={key}
+                lineKey={`s:${key}`}
+                row={s}
+                index={idx + 1}
+                technicians={technicians}
+                myTechId={myTechId}
+                isTecnico={isTecnico}
+                isLast={idx === orderServices.length - 1 && blankServices.length === 0}
+                onAddBlank={() => addBlank(setBlankServices)}
+                onCommit={commitServiceLine}
+                onResolve={resolveLine}
+                onDelete={handleServiceDelete}
+              />
+            )
+          })}
+          {blankServices.map((id, bi) => (
+            <ServiceLineRow
+              key={`new-service-${id}`}
+              lineKey={`s:new-${id}`}
+              row={null}
+              index={orderServices.length + bi + 1}
+              technicians={technicians}
+              myTechId={myTechId}
+              isTecnico={isTecnico}
+              isLast={bi === blankServices.length - 1}
+              onAddBlank={() => addBlank(setBlankServices)}
+              onRemoveBlank={() => removeBlank(setBlankServices, id)}
+              onBlankSaved={() => blankSaved(setBlankServices, id)}
+              onCommit={commitServiceLine}
+              onResolve={resolveLine}
+              onDelete={handleServiceDelete}
+            />
+          ))}
+        </div>
+        <button type="button" className="line-add" onClick={() => addBlank(setBlankServices)}>+ adicionar serviço</button>
 
-        {editingService !== null && createPortal(
-          <div className="form-modal-overlay" onClick={() => setEditingService(null)}>
-            <div className="form-modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
-              <div className="form-modal-header">
-                <span>{editingService.id_service ? 'Editar Serviço' : 'Novo Serviço'}{orderId ? ` — OS #${orderId}` : ''}</span>
-                <button className="modal-close" onClick={() => setEditingService(null)}>✕</button>
-              </div>
-              <div style={{ padding: '1rem' }}>
-                <div className="form-group">
-                  <label>Descrição</label>
-                  <input type="text" name="description" value={serviceForm.description} onChange={handleServiceChange} autoFocus />
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: isTecnico ? '2fr 1fr' : '2fr 1fr 1fr', gap: '0 16px' }}>
-                  <div className="form-group">
-                    <label>Técnico</label>
-                    {isTecnico ? (
-                      <input type="text" value={technicians.find(t => t.id_user === myUserId)?.name ?? ''} readOnly />
-                    ) : (
-                      <SelectAutocomplete
-                        items={technicians}
-                        value={serviceForm.id_technician}
-                        onChange={val => setServiceForm(prev => ({ ...prev, id_technician: val }))}
-                        getId={t => t.id_technician}
-                        getLabel={t => t.name ?? ''}
-                        placeholder="Digite o nome do técnico..."
-                      />
-                    )}
-                  </div>
-                  <div className="form-group">
-                    <label>Horas</label>
-                    <input type="number" name="hours_quantity" value={serviceForm.hours_quantity} onChange={handleServiceChange} min="0" step="any" />
-                  </div>
-                  {!isTecnico && <div className="form-group">
-                    <label>Valor Unitário</label>
-                    <input type="number" name="unit_value" value={serviceForm.unit_value} onChange={handleServiceChange} min="0" step="0.01" />
-                  </div>}
-                </div>
-                {!isTecnico && <div style={{ display: 'flex', alignItems: 'flex-end', gap: '16px' }}>
-                  <div className="form-group" style={{ width: 140, flexShrink: 0 }}>
-                    <label>Total</label>
-                    <input type="number" name="total_value" value={serviceForm.total_value} onChange={handleServiceChange} min="0" step="0.01" />
-                  </div>
-                  <div className="form-actions" style={{ margin: 0, paddingBottom: '1px' }}>
-                    <button type="button" className="btn-novo" onClick={handleServiceSave} disabled={serviceSaving}>
-                      {serviceSaving ? 'Salvando...' : 'Salvar serviço'}
-                    </button>
-                    <button type="button" onClick={() => setEditingService(null)}>Cancelar</button>
-                  </div>
-                </div>}
-                {isTecnico && <div className="form-actions">
-                  <button type="button" className="btn-novo" onClick={handleServiceSave} disabled={serviceSaving}>
-                    {serviceSaving ? 'Salvando...' : 'Salvar serviço'}
-                  </button>
-                  <button type="button" onClick={() => setEditingService(null)}>Cancelar</button>
-                </div>}
-                {serviceError && <p className="error">{serviceError}</p>}
-              </div>
-            </div>
-          </div>,
-          document.body
+        {orderServices.length > 0 && !isTecnico && (
+          <div className="section-total">
+            Total de Serviços: {orderServices
+              .reduce((acc, s) => Number(s.status) === 6 ? acc : acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
+              .toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          </div>
         )}
       </div>
 
       {/* ── Products section ─────────────────────────────────── */}
       <div className="contact-section">
-        <div className="contact-section-header">
+        <div className="contact-section-header os-section-title">
           <span>Produtos</span>
-          <button type="button" className="btn-add-contact" onClick={openNewProduct}>
-            + Adicionar
-          </button>
         </div>
 
-        {productError && editingProduct === null && <p className="error">{productError}</p>}
+        {productError && <p className="error">{productError}</p>}
 
-        {orderProducts.length > 0 && (
-          <table className="services-table">
-            <thead>
-              <tr>
-                <th>Produto</th>
-                <th>Qtd</th>
-                {!isTecnico && <th>Valor Unit.</th>}
-                {!isTecnico && <th>Total</th>}
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {orderProducts.map((p, idx) => {
+        <div className="line-table">
+          <div className={`line-header${isTecnico ? ' no-price' : ' product-line'}`}>
+            <span></span>
+            <span>Produto</span>
+            <span>Qtde.</span>
+            {!isTecnico && <span>Valor custo</span>}
+            {!isTecnico && <span>Valor unit.</span>}
+            {!isTecnico && <span>Valor total</span>}
+            <span></span>
+          </div>
+          {orderProducts.map((p, idx) => {
+            const key = p.id_service_order_product ?? p._tempId ?? idx
+            return (
+              <ProductLineRow
+                key={key}
+                lineKey={`p:${key}`}
+                row={p}
+                index={idx + 1}
+                inventoryItems={inventoryItems}
+                inventoryReady={inventoryReady}
+                productMakes={productMakes}
+                isTecnico={isTecnico}
+                isLast={idx === orderProducts.length - 1 && blankProducts.length === 0}
+                onAddBlank={() => addBlank(setBlankProducts)}
+                onCommit={commitProductLine}
+                onResolve={resolveLine}
+                onDelete={handleProductDelete}
+              />
+            )
+          })}
+          {blankProducts.map((id, bi) => (
+            <ProductLineRow
+              key={`new-product-${id}`}
+              lineKey={`p:new-${id}`}
+              row={null}
+              index={orderProducts.length + bi + 1}
+              inventoryItems={inventoryItems}
+              inventoryReady={inventoryReady}
+              productMakes={productMakes}
+              isTecnico={isTecnico}
+              isLast={bi === blankProducts.length - 1}
+              onAddBlank={() => addBlank(setBlankProducts)}
+              onRemoveBlank={() => removeBlank(setBlankProducts, id)}
+              onBlankSaved={() => blankSaved(setBlankProducts, id)}
+              onCommit={commitProductLine}
+              onResolve={resolveLine}
+              onDelete={handleProductDelete}
+            />
+          ))}
+        </div>
+        <button type="button" className="line-add" onClick={() => addBlank(setBlankProducts)}>+ adicionar produto</button>
+
+        {orderProducts.length > 0 && !isTecnico && (
+          <div className="section-total">
+            Total de Produtos: {orderProducts
+              .reduce((acc, p) => {
                 const inv = inventoryItems.find(i => i.id_product === Number(p.id_product))
-                const price = inv?.sales_price != null ? Number(inv.sales_price) : null
-                const lineTotal = price != null && p.quantity ? price * Number(p.quantity) : null
-                const makerName = inv?.id_make ? (productMakes.find(m => m.id_make === inv.id_make)?.name ?? '') : ''
-                const productLabel = [p.product_name ?? inv?.name, makerName].filter(Boolean).join(' · ')
-                return (
-                  <tr key={p.id_service_order_product ?? p._tempId ?? idx}>
-                    <td>
-                      <div>{productLabel || p.id_product}</div>
-                      {inv?.current_quantity != null && (
-                        <div style={{ fontSize: '0.75rem', color: '#888' }}>Estoque: {inv.current_quantity}</div>
-                      )}
-                    </td>
-                    <td>{p.quantity}</td>
-                    {!isTecnico && <td>{price != null ? price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : ''}</td>}
-                    {!isTecnico && <td>{lineTotal != null ? lineTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : ''}</td>}
-                    <td className="actions-col">
-                      <button type="button" className="btn-edit" onClick={() => openEditProduct(p)}>Editar</button>
-                      <button type="button" className="btn-delete" onClick={() => handleProductDelete(p)}>Excluir</button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
-
-        {editingProduct !== null && createPortal(
-          <div className="form-modal-overlay" onClick={() => setEditingProduct(null)}>
-            <div className="form-modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
-              <div className="form-modal-header">
-                <span>{editingProduct.id_service_order_product ? 'Editar Produto' : 'Novo Produto'}{orderId ? ` — OS #${orderId}` : ''}</span>
-                <button className="modal-close" onClick={() => setEditingProduct(null)}>✕</button>
-              </div>
-              <div style={{ padding: '1rem' }}>
-                <div className="form-group">
-                  <label>Produto</label>
-                  <div className="autocomplete-with-add">
-                    <SelectAutocomplete
-                      items={inventoryItems}
-                      value={productForm.id_product}
-                      onChange={val => setProductForm(prev => ({ ...prev, id_product: val }))}
-                      getId={i => i.id_product}
-                      getLabel={i => {
-                        const maker = i.id_make ? (productMakes.find(m => m.id_make === i.id_make)?.name ?? '') : ''
-                        const parts = [i.name, maker].filter(Boolean).join(' · ')
-                        const qty = i.current_quantity != null ? ` (Estoque: ${i.current_quantity})` : ''
-                        return parts + (i.code ? ` [${i.code}]` : '') + qty
-                      }}
-                      placeholder="Digite o nome ou código..."
-                      maxSuggestions={30}
-                    />
-                    <button
-                      type="button"
-                      className="btn-add-inline"
-                      onClick={() => setNewProductOpen(true)}
-                      title="Cadastrar novo produto no estoque"
-                    >+</button>
-                  </div>
-                  <p style={{ fontSize: '0.78rem', color: '#888', margin: '4px 0 0' }}>
-                    Mostrando os 30 primeiros produtos. Não encontrou o que procura? Comece a digitar para buscar.
-                  </p>
-                </div>
-                {newProductOpen && (
-                  <NewProductModal
-                    onSaved={created => {
-                      setInventoryItems(prev => [...prev, created])
-                      setProductForm(prev => ({ ...prev, id_product: created.id_product }))
-                      setNewProductOpen(false)
-                    }}
-                    onCancel={() => setNewProductOpen(false)}
-                  />
-                )}
-                {productForm.id_product !== '' && (() => {
-                  const inv = inventoryItems.find(i => i.id_product === Number(productForm.id_product))
-                  return inv?.sales_price != null && !isTecnico ? (
-                    <div className="form-group">
-                      <label>Valor Unit.</label>
-                      <input type="text" value={Number(inv.sales_price).toFixed(2)} readOnly />
-                    </div>
-                  ) : null
-                })()}
-                <div className="form-group">
-                  <label>Quantidade</label>
-                  <input type="number" name="quantity" value={productForm.quantity} onChange={handleProductChange} min="0.001" step="any" />
-                </div>
-                {productError && <p className="error">{productError}</p>}
-                <div className="form-actions">
-                  <button type="button" className="btn-novo" onClick={handleProductSave} disabled={productSaving}>
-                    {productSaving ? 'Salvando...' : 'Salvar produto'}
-                  </button>
-                  <button type="button" onClick={() => setEditingProduct(null)}>Cancelar</button>
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body
+                const price = lineUnitPrice(p, inv)
+                return acc + (price != null ? Number(price) * Number(p.quantity || 0) : 0)
+              }, 0)
+              .toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          </div>
         )}
       </div>
 
       {/* ── Payments section ─────────────────────────────────── */}
       {!isTecnico && <div className="contact-section">
-        <div className="contact-section-header">
+        <div className="contact-section-header os-section-title">
           <span>Pagamentos</span>
-          <button type="button" className="btn-add-contact" onClick={openNewPayment} disabled={editingPayment !== null}>
+        </div>
+        <div style={{ margin: '6px 0' }}>
+          <button type="button" className="btn-add-contact" onClick={openNewPayment}>
             + Adicionar
           </button>
         </div>
@@ -2210,6 +2605,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
           <table className="services-table">
             <thead>
               <tr>
+                <th></th>
                 <th>Forma</th>
                 <th>Vencimento</th>
                 <th>Pagamento</th>
@@ -2220,6 +2616,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
             <tbody>
               {orderPayments.map((p, idx) => (
                 <tr key={p.id_payment ?? p._tempId ?? idx}>
+                  <td style={{ width: 1, padding: '6px 4px' }}><span className="line-index" style={{ display: 'block', width: 34 }}>{idx + 1}</span></td>
                   <td>{p.payment_method_description ?? ''}</td>
                   <td>{isoToBR(p.due_date)}</td>
                   <td>{isoToBR(p.payment_date)}</td>
@@ -2234,109 +2631,118 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
           </table>
         )}
 
-        {editingPayment !== null && (
-          <div className="contact-editor">
-            {(() => {
-              const selectedMethod = paymentMethods.find(m => m.id_payment_method === Number(paymentForm.id_payment_method))
-              const showInstallments = isCreditCard(selectedMethod?.description) && !editingPayment?.id_payment
-              return (
-                <>
-                  <div style={{ display: 'grid', gridTemplateColumns: showInstallments ? '1fr 1.5fr 0.7fr' : '1fr 2fr', gap: '0 16px' }}>
-                    <div className="form-group">
-                      <label>Valor</label>
-                      <input type="number" name="value" value={paymentForm.value} onChange={handlePaymentChange} min="0" step="0.01" />
-                    </div>
-                    <div className="form-group">
-                      <label>Forma de Pagamento</label>
-                      <SelectAutocomplete
-                        items={paymentMethods}
-                        value={paymentForm.id_payment_method}
-                        onChange={val => setPaymentForm(prev => ({ ...prev, id_payment_method: val, installments: 1 }))}
-                        getId={m => m.id_payment_method}
-                        getLabel={m => m.description ?? ''}
-                        placeholder="Digite a forma de pagamento..."
-                      />
-                    </div>
-                    {showInstallments && (
-                      <div className="form-group">
-                        <label>Parcelas</label>
-                        <select
-                          name="installments"
-                          value={paymentForm.installments}
-                          onChange={handlePaymentChange}
-                        >
-                          {Array.from({ length: 24 }, (_, i) => i + 1).map(n => (
-                            <option key={n} value={n}>{n}x</option>
-                          ))}
-                        </select>
+        {editingPayment !== null && createPortal(
+          <div className="form-modal-overlay" onClick={() => setEditingPayment(null)}>
+            <div className="form-modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+              <div className="form-modal-header">
+                <span>{editingPayment?.id_payment ? 'Editar Pagamento' : 'Novo Pagamento'}{orderId ? ` — OS #${orderId}` : ''}</span>
+                <button className="modal-close" onClick={() => setEditingPayment(null)}>✕</button>
+              </div>
+              <div style={{ padding: '1rem' }}>
+                {(() => {
+                  const selectedMethod = paymentMethods.find(m => m.id_payment_method === Number(paymentForm.id_payment_method))
+                  const showInstallments = isCreditCard(selectedMethod?.description) && !editingPayment?.id_payment
+                  return (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: showInstallments ? '1fr 1.5fr 0.7fr' : '1fr 2fr', gap: '0 16px' }}>
+                        <div className="form-group">
+                          <label>Valor</label>
+                          <input type="number" name="value" value={paymentForm.value} onChange={handlePaymentChange} min="0" step="0.01" />
+                        </div>
+                        <div className="form-group">
+                          <label>Forma de Pagamento</label>
+                          <SelectAutocomplete
+                            items={paymentMethods}
+                            value={paymentForm.id_payment_method}
+                            onChange={val => setPaymentForm(prev => ({ ...prev, id_payment_method: val, installments: 1 }))}
+                            getId={m => m.id_payment_method}
+                            getLabel={m => m.description ?? ''}
+                            placeholder="Digite a forma de pagamento..."
+                          />
+                        </div>
+                        {showInstallments && (
+                          <div className="form-group">
+                            <label>Parcelas</label>
+                            <select
+                              name="installments"
+                              value={paymentForm.installments}
+                              onChange={handlePaymentChange}
+                            >
+                              {Array.from({ length: 24 }, (_, i) => i + 1).map(n => (
+                                <option key={n} value={n}>{n}x</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </>
+                  )
+                })()}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+                  <div className="form-group">
+                    <label>Vencimento</label>
+                    <div className="date-picker-wrapper">
+                      <input
+                        type="text"
+                        value={dueDateDisplay}
+                        onChange={e => {
+                          const display = maskDate(e.target.value)
+                          setDueDateDisplay(display)
+                          setPaymentForm(prev => ({ ...prev, due_date: brToISO(display) }))
+                        }}
+                        placeholder="dd/mm/aaaa"
+                        maxLength={10}
+                      />
+                      <input
+                        type="date"
+                        ref={dueDatePickerRef}
+                        className="hidden-date-picker"
+                        onChange={e => {
+                          setPaymentForm(prev => ({ ...prev, due_date: e.target.value }))
+                          setDueDateDisplay(isoToBR(e.target.value))
+                        }}
+                      />
+                      <button type="button" className="btn-calendar" onClick={() => dueDatePickerRef.current?.showPicker()}>📅</button>
+                    </div>
                   </div>
-                </>
-              )
-            })()}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-              <div className="form-group">
-                <label>Vencimento</label>
-                <div className="date-picker-wrapper">
-                  <input
-                    type="text"
-                    value={dueDateDisplay}
-                    onChange={e => {
-                      const display = maskDate(e.target.value)
-                      setDueDateDisplay(display)
-                      setPaymentForm(prev => ({ ...prev, due_date: brToISO(display) }))
-                    }}
-                    placeholder="dd/mm/aaaa"
-                    maxLength={10}
-                  />
-                  <input
-                    type="date"
-                    ref={dueDatePickerRef}
-                    className="hidden-date-picker"
-                    onChange={e => {
-                      setPaymentForm(prev => ({ ...prev, due_date: e.target.value }))
-                      setDueDateDisplay(isoToBR(e.target.value))
-                    }}
-                  />
-                  <button type="button" className="btn-calendar" onClick={() => dueDatePickerRef.current?.showPicker()}>📅</button>
+                  <div className="form-group">
+                    <label>Data de Pagamento</label>
+                    <div className="date-picker-wrapper">
+                      <input
+                        type="text"
+                        value={paymentDateDisplay}
+                        onChange={e => {
+                          const display = maskDate(e.target.value)
+                          setPaymentDateDisplay(display)
+                          setPaymentForm(prev => ({ ...prev, payment_date: brToISO(display) }))
+                        }}
+                        placeholder="dd/mm/aaaa"
+                        maxLength={10}
+                      />
+                      <input
+                        type="date"
+                        ref={paymentDatePickerRef}
+                        className="hidden-date-picker"
+                        onChange={e => {
+                          setPaymentForm(prev => ({ ...prev, payment_date: e.target.value }))
+                          setPaymentDateDisplay(isoToBR(e.target.value))
+                        }}
+                      />
+                      <button type="button" className="btn-calendar" onClick={() => paymentDatePickerRef.current?.showPicker()}>📅</button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="form-group">
-                <label>Data de Pagamento</label>
-                <div className="date-picker-wrapper">
-                  <input
-                    type="text"
-                    value={paymentDateDisplay}
-                    onChange={e => {
-                      const display = maskDate(e.target.value)
-                      setPaymentDateDisplay(display)
-                      setPaymentForm(prev => ({ ...prev, payment_date: brToISO(display) }))
-                    }}
-                    placeholder="dd/mm/aaaa"
-                    maxLength={10}
-                  />
-                  <input
-                    type="date"
-                    ref={paymentDatePickerRef}
-                    className="hidden-date-picker"
-                    onChange={e => {
-                      setPaymentForm(prev => ({ ...prev, payment_date: e.target.value }))
-                      setPaymentDateDisplay(isoToBR(e.target.value))
-                    }}
-                  />
-                  <button type="button" className="btn-calendar" onClick={() => paymentDatePickerRef.current?.showPicker()}>📅</button>
+                {paymentError && <p className="error">{paymentError}</p>}
+                <div className="form-actions">
+                  <button type="button" className="btn-novo" onClick={handlePaymentSave} disabled={paymentSaving}>
+                    {paymentSaving ? 'Salvando...' : 'Salvar pagamento'}
+                  </button>
+                  <button type="button" onClick={() => setEditingPayment(null)}>Cancelar</button>
                 </div>
               </div>
             </div>
-            {paymentError && <p className="error">{paymentError}</p>}
-            <div className="form-actions">
-              <button type="button" className="btn-novo" onClick={handlePaymentSave} disabled={paymentSaving}>
-                {paymentSaving ? 'Salvando...' : 'Salvar pagamento'}
-              </button>
-              <button type="button" onClick={() => setEditingPayment(null)}>Cancelar</button>
-            </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>}
 
@@ -2345,7 +2751,8 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
         const totalServices = orderServices.reduce((acc, s) => Number(s.status) === 6 ? acc : acc + (s.total_value != null ? Number(s.total_value) : 0), 0)
         const totalProducts = orderProducts.reduce((acc, p) => {
           const inv = inventoryItems.find(i => i.id_product === Number(p.id_product))
-          return acc + (inv?.sales_price != null ? Number(inv.sales_price) * Number(p.quantity || 0) : 0)
+          const price = lineUnitPrice(p, inv)
+          return acc + (price != null ? price * Number(p.quantity || 0) : 0)
         }, 0)
         const total = totalServices + totalProducts
         const totalThirdParty = orderServices.reduce((acc, s) => {
@@ -2436,7 +2843,7 @@ export function ServiceOrderForm({ initialData, onSaved, onCancel }) {
   )
 }
 
-export const { NewPage: ServiceOrderNewPage } = makeFormPages(ServiceOrderForm, 'Ordens de Serviço', '/service-orders')
+export const { NewPage: ServiceOrderNewPage } = makeFormPages(ServiceOrderForm, 'Ordem de Serviço', '/service-orders')
 
 export function ServiceOrderEditPage() {
   const navigate = useNavigate()
@@ -2448,7 +2855,7 @@ export function ServiceOrderEditPage() {
   return (
     <div className="crud-page">
       <div className="crud-toolbar">
-        <h2>Editar — Ordens de Serviço</h2>
+        <h2>Editar — Ordem de Serviço{state.item.id_order ? ` — OS #${state.item.id_order}` : ''}</h2>
       </div>
       <ServiceOrderForm
         initialData={state.item}
@@ -2482,7 +2889,8 @@ function isoToBR(iso) {
 function WppSendModal({ order, onClose }) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState(null)
-  const [noPhone, setNoPhone] = useState(false)
+  const [phoneNeeded, setPhoneNeeded] = useState(null) // null | 'no_phone' | 'invalid_whatsapp_number'
+  const [phoneNeededMessage, setPhoneNeededMessage] = useState('')
   const [manualPhone, setManualPhone] = useState('')
   const [sent, setSent] = useState(false)
 
@@ -2493,7 +2901,12 @@ function WppSendModal({ order, onClose }) {
       await sendServiceOrderWhatsApp(order.id_order, phoneOverride ?? '')
       setSent(true)
     } catch (e) {
-      if (e.code === 'no_phone') { setNoPhone(true); setSending(false); return }
+      if (e.code === 'no_phone' || e.code === 'invalid_whatsapp_number') {
+        setPhoneNeeded(e.code)
+        setPhoneNeededMessage(e.message)
+        setSending(false)
+        return
+      }
       setError(e.message)
     } finally {
       setSending(false)
@@ -2514,10 +2927,10 @@ function WppSendModal({ order, onClose }) {
             <p style={{ color: '#4ade80', fontWeight: 600 }}>PDF enviado com sucesso!</p>
             <button className="btn-novo" style={{ marginTop: '1rem' }} onClick={onClose}>Fechar</button>
           </div>
-        ) : noPhone ? (
+        ) : phoneNeeded ? (
           <div style={{ padding: '1rem' }}>
             <p style={{ color: '#f59e0b', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
-              O cliente não possui número de WhatsApp cadastrado. Informe o número abaixo:
+              {phoneNeededMessage || 'O cliente não possui número de WhatsApp cadastrado. Informe o número abaixo:'}
             </p>
             <div className="form-group">
               <label>Número WhatsApp (com DDI e DDD)</label>
@@ -2560,7 +2973,7 @@ function WppSendModal({ order, onClose }) {
 const SO_FILTERS_KEY = '/service-orders:extra'
 
 export default function ServiceOrderPage() {
-  const todayBR = isoToBR(new Date().toISOString().slice(0, 10))
+  const todayBR = isoToBR(serverTodayISO())
   const initialExtraFilters = loadFilters(SO_FILTERS_KEY, { fromDisplay: todayBR, toDisplay: todayBR, statusFilter: null })
   const [fromDisplay, setFromDisplay] = useState(initialExtraFilters.fromDisplay)
   const [toDisplay,   setToDisplay]   = useState(initialExtraFilters.toDisplay)
@@ -2604,7 +3017,7 @@ export default function ServiceOrderPage() {
     <>
     {wppOrder && <WppSendModal order={wppOrder} onClose={() => setWppOrder(null)} />}
     <CrudPage
-      title="🔧⚙️ Ordens de Serviço"
+      title="⚙️ Ordens de Serviço"
       fetchAll={fetchAllServiceOrder}
       deleteItem={deleteServiceOrder}
       fields={FIELDS}
@@ -2612,11 +3025,14 @@ export default function ServiceOrderPage() {
       createLabel="+ Nova OS"
       filterKeys={['id_order', 'customer_name', 'model_name', 'plate_number']}
       filterPlaceholder="OS, Cliente, Modelo ou Placa..."
-      DetailComponent={ServiceOrderDetailFull}
+      persistSearch={false}
+      DetailComponent={isTecnicoPage ? undefined : ServiceOrderDetailFull}
       closeOnOverlayClick={false}
       basePath="/service-orders"
       pageSize={20}
-      rowActions={sendWpp ? (item) => (
+      canCreate={!isTecnicoPage}
+      canDelete={!isTecnicoPage}
+      rowActions={sendWpp && !isTecnicoPage ? (item) => (
         <button
           className="btn-edit"
           style={{ background: '#25d366', color: '#fff', border: 'none' }}

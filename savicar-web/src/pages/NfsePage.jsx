@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react'
 import { fetchAllCustomer, fetchTenantConfig, fetchNfNextNumero, emitirNfse, consultarNfse, previewNfsePdf } from '../api'
+import { serverNow } from '../serverClock'
 
 function focusStatus(result) {
   return (result?.focus_response?.status ?? '').toString()
 }
 
 function focusErros(result) {
-  return Array.isArray(result?.focus_response?.erros) ? result.focus_response.erros : []
+  const resp = result?.focus_response
+  if (Array.isArray(resp?.erros)) return resp.erros
+  if (resp && typeof resp === 'object' && typeof resp.mensagem === 'string') {
+    return [{ codigo: resp.codigo, mensagem: resp.mensagem }]
+  }
+  return []
 }
 
 function isProcessing(result) {
@@ -14,6 +20,7 @@ function isProcessing(result) {
 }
 
 function isRejected(result) {
+  if (typeof result?.focus_status_code === 'number' && result.focus_status_code >= 400) return true
   if (focusErros(result).length > 0) return true
   const status = focusStatus(result).toLowerCase()
   return ['erro', 'rejeit', 'cancel', 'negad'].some(s => status.includes(s))
@@ -39,7 +46,7 @@ function customerDisplayName(c) {
 }
 
 function todayISOWithOffset() {
-  const now = new Date()
+  const now = serverNow()
   const y = now.getFullYear()
   const m = String(now.getMonth() + 1).padStart(2, '0')
   const d = String(now.getDate()).padStart(2, '0')
@@ -47,7 +54,7 @@ function todayISOWithOffset() {
 }
 
 function nowISOForDateTimeLocal() {
-  const now = new Date()
+  const now = serverNow()
   const pad = n => String(n).padStart(2, '0')
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
 }
@@ -80,6 +87,7 @@ const emptyForm = {
 }
 
 function buildPayload(form) {
+  const tomadorDoc = form.cnpjTomador.replace(/\D/g, '')
   return {
     data_emissao: form.dataEmissao ? `${form.dataEmissao}:00-03:00` : '',
     serie_dps: form.serieDps.trim(),
@@ -92,7 +100,8 @@ function buildPayload(form) {
     codigo_opcao_simples_nacional: form.codigoOpcaoSimplesNacional.trim(),
     regime_tributario_simples_nacional: form.regimeTributarioSimplesNacional.trim(),
     regime_especial_tributacao: form.regimeEspecialTributacao.trim(),
-    cnpj_tomador: form.cnpjTomador.replace(/\D/g, ''),
+    // 11 digits = CPF, anything else is sent as CNPJ
+    ...(tomadorDoc.length === 11 ? { cpf_tomador: tomadorDoc } : { cnpj_tomador: tomadorDoc }),
     razao_social_tomador: form.razaoSocialTomador.trim(),
     codigo_municipio_prestacao: form.codigoMunicipioPrestacao.trim(),
     codigo_tributacao_nacional_iss: form.codigoTributacaoNacionalIss.trim(),
@@ -160,7 +169,7 @@ export default function NfsePage() {
     setResult(null)
     if (!form.descricaoServico.trim()) { setError('Descrição do serviço é obrigatória.'); return }
     if (!form.razaoSocialTomador.trim()) { setError('Razão social do tomador é obrigatória.'); return }
-    if (!form.cnpjTomador.trim()) { setError('CNPJ do tomador é obrigatório.'); return }
+    if (!form.cnpjTomador.trim()) { setError('CPF/CNPJ do tomador é obrigatório.'); return }
     if (!form.valorServico.trim()) { setError('Valor do serviço é obrigatório.'); return }
     setError(null)
     setSubmitting(true)
@@ -193,7 +202,7 @@ export default function NfsePage() {
     setConsulting(true)
     setError(null)
     try {
-      const data = await consultarNfse(result.ref)
+      const data = await consultarNfse(result.ref, form.razaoSocialTomador, form.valorServico)
       setResult(data)
     } catch (err) {
       setError(err.message)
@@ -268,7 +277,7 @@ export default function NfsePage() {
         <h3 style={{ margin: '16px 0 8px' }}>Tomador</h3>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
           <div className="form-group">
-            <label>Razão Social do Tomador</label>
+            <label>Nome Tomador</label>
             <input
               name="razaoSocialTomador"
               value={form.razaoSocialTomador}
@@ -283,7 +292,7 @@ export default function NfsePage() {
             </datalist>
           </div>
           <div className="form-group">
-            <label>CNPJ do Tomador</label>
+            <label>CPF/CNPJ Tomador</label>
             <input name="cnpjTomador" value={form.cnpjTomador} onChange={handleChange} />
           </div>
         </div>
@@ -386,6 +395,15 @@ export default function NfsePage() {
           <pre style={{ background: '#0e0f16', padding: 12, borderRadius: 6, overflowX: 'auto', fontSize: '0.85rem', color: '#e2e8f0' }}>
             {JSON.stringify(result.focus_response ?? result.focus_response_raw, null, 2)}
           </pre>
+
+          {isRejected(result) && result.focus_curl && (
+            <>
+              <p style={{ margin: '8px 0 4px', fontSize: '0.8rem', color: '#94a3b8' }}>curl do envio:</p>
+              <pre style={{ background: '#0e0f16', padding: 12, borderRadius: 6, overflowX: 'auto', fontSize: '0.8rem', color: '#94a3b8', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {result.focus_curl}
+              </pre>
+            </>
+          )}
         </div>
       )}
     </div>

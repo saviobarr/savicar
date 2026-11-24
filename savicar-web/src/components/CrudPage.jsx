@@ -4,9 +4,10 @@ import { useNavigate } from 'react-router-dom'
 import { loadFilters, saveFilters } from '../filterStorage'
 import { matchesSearchQuery } from '../searchUtils'
 
-export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComponent, createLabel = '+ Novo', idKey, filterKeys, filterPlaceholder = 'Filtrar...', DetailComponent, pageSize, closeOnOverlayClick = true, basePath, extraActions, extraFilters, additionalFilter, rowActions }) {
+export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComponent, createLabel = '+ Novo', idKey, filterKeys, filterPlaceholder = 'Filtrar...', DetailComponent, pageSize, closeOnOverlayClick = true, basePath, extraActions, extraFilters, additionalFilter, rowActions, canCreate = true, canDelete = true, persistSearch = true }) {
   const storageKey = basePath || title
   const initialFilters = loadFilters(storageKey, { search: '', currentPage: 1, sortKey: null, sortDir: 'asc' })
+  if (!persistSearch) initialFilters.search = ''
 
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -125,7 +126,7 @@ export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComp
     <div className="crud-page">
       <div className="crud-toolbar">
         <h2>{title}</h2>
-        <button className="btn-novo" onClick={openCreate}>{createLabel}</button>
+        {canCreate && <button className="btn-novo" onClick={openCreate}>{createLabel}</button>}
         {extraActions}
       </div>
       {(filterKeys || extraFilters) && (
@@ -188,7 +189,7 @@ export default function CrudPage({ title, fetchAll, deleteItem, fields, FormComp
                   <td className="actions-col" onClick={e => e.stopPropagation()}>
                     {rowActions && rowActions(item)}
                     <button className="btn-edit" onClick={() => openEdit(item)}>Editar</button>
-                    <button className="btn-delete" onClick={() => askDelete(item)}>Excluir</button>
+                    {canDelete && <button className="btn-delete" onClick={() => askDelete(item)}>Excluir</button>}
                   </td>
                 </tr>
               ))

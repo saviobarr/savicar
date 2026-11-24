@@ -21,7 +21,9 @@ import {
   fetchAllVehicleMake,
   fetchAllVehicleModel,
   createVehicleModel,
+  fetchVehicleByPlate,
 } from '../api'
+import { matchVehicleModel } from '../vehicleLookup'
 
 async function fetchCustomersWithCars() {
   const [customers, allModels] = await Promise.all([fetchAllCustomer(), fetchAllCustomerModel()])
@@ -44,8 +46,8 @@ async function fetchCustomersWithCars() {
 }
 
 const FIELDS = [
-  { key: 'trade_name', label: 'Nome Fantasia' },
   { key: 'individual_name', label: 'Nome' },
+  { key: 'trade_name', label: 'Nome Fantasia' },
   { key: 'tax_id', label: 'CPF/CNPJ' },
   {
     key: '_car_label',
@@ -109,14 +111,16 @@ export function CustomerForm({ initialData, onSaved, onCancel }) {
   const [newModelForm, setNewModelForm] = useState({ name: '', version: '' })
   const [newModelSaving, setNewModelSaving] = useState(false)
   const [newModelError, setNewModelError] = useState(null)
+  const [lookingUpPlate, setLookingUpPlate] = useState(false)
+  const [plateLookupError, setPlateLookupError] = useState(null)
 
   useEffect(() => {
-    Promise.all([fetchAllCountry(), fetchAllState(), fetchAllCity(), fetchAllVehicleMake(), fetchAllVehicleModel()])
+    Promise.all([fetchAllCountry(), fetchAllState(), fetchAllCity(), fetchAllVehicleMake(1), fetchAllVehicleModel()])
       .then(([ctrs, sts, cits, mks, mds]) => {
         setCountries(ctrs)
         setStates(sts)
         setCities(cits)
-        setMakes(mks)
+        setMakes([...mks].sort((a, b) => (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase())))
         setAllModels(mds)
         const brasil = ctrs.find(c => c.name?.trim().toLowerCase() === 'brasil')
         if (brasil) {
@@ -231,6 +235,7 @@ export function CustomerForm({ initialData, onSaved, onCancel }) {
     setEditingVehicle({})
     setVehicleError(null)
     setShowNewModelForm(false)
+    setPlateLookupError(null)
   }
 
   function openEditVehicle(v) {
@@ -247,6 +252,7 @@ export function CustomerForm({ initialData, onSaved, onCancel }) {
     setEditingVehicle(v)
     setVehicleError(null)
     setShowNewModelForm(false)
+    setPlateLookupError(null)
   }
 
   function handleVehicleChange(e) {
@@ -255,6 +261,38 @@ export function CustomerForm({ initialData, onSaved, onCancel }) {
       setVehicleForm(prev => ({ ...prev, id_make: value, id_model: '' }))
     } else {
       setVehicleForm(prev => ({ ...prev, [name]: value }))
+    }
+  }
+
+  function handleClearVehicleForm() {
+    setVehicleForm(emptyVehicleForm)
+    setVehicleError(null)
+    setPlateLookupError(null)
+  }
+
+  async function handleLookupVehiclePlate() {
+    if (!vehicleForm.plate.trim()) return
+    setLookingUpPlate(true)
+    setPlateLookupError(null)
+    try {
+      const result = await fetchVehicleByPlate(vehicleForm.plate.trim())
+      const model = matchVehicleModel(result, makes, allModels)
+      setVehicleForm(prev => ({
+        ...prev,
+        plate: result.plate || prev.plate,
+        year_make: result.year_make || prev.year_make,
+        year_model: result.year_model || prev.year_model,
+        color: result.color || prev.color,
+        id_model: model ? String(model.id_model) : prev.id_model,
+        id_make: model?.id_make != null ? String(model.id_make) : prev.id_make,
+      }))
+      if (!model) {
+        setPlateLookupError('Veículo encontrado, mas não foi possível identificar o modelo automaticamente. Selecione manualmente.')
+      }
+    } catch (err) {
+      setPlateLookupError(err.message || 'Erro ao consultar placa')
+    } finally {
+      setLookingUpPlate(false)
     }
   }
 
@@ -373,9 +411,10 @@ export function CustomerForm({ initialData, onSaved, onCancel }) {
             id_city: contactData.id_city !== '' ? Number(contactData.id_city) : null,
           })
         }
+        const createdModels = []
         for (const v of vehicles) {
           const { _tempId, id_make, ...vehicleData } = v
-          await createCustomerModel({
+          const cm = await createCustomerModel({
             id_customer: created.id_customer,
             id_model: vehicleData.id_model !== '' ? Number(vehicleData.id_model) : null,
             plate: vehicleData.plate || null,
@@ -384,8 +423,9 @@ export function CustomerForm({ initialData, onSaved, onCancel }) {
             color: vehicleData.color || null,
             vin: vehicleData.vin || null,
           })
+          if (cm) createdModels.push(cm)
         }
-        onSaved(created)
+        onSaved(created, createdModels)
       }
     } catch (err) {
       setError(err.message)
@@ -487,74 +527,6 @@ export function CustomerForm({ initialData, onSaved, onCancel }) {
             </div>
           </div>
         ))}
-        {editingContact !== null && (
-          <div className="contact-editor">
-            <div className="form-group">
-              <label>Celular</label>
-              <input type="text" name="mobile_phone" value={contactForm.mobile_phone} onChange={handleContactChange} autoFocus />
-            </div>
-            <div className="form-group form-group-check">
-              <label>
-                <input type="checkbox" name="is_mobile_phone_whatsapp" checked={contactForm.is_mobile_phone_whatsapp} onChange={handleContactChange} />
-                {' '}WhatsApp
-              </label>
-            </div>
-            <div className="form-group">
-              <label>E-mail</label>
-              <input type="email" name="email" value={contactForm.email} onChange={handleContactChange} />
-            </div>
-            <div className="form-group">
-              <label>Endereço</label>
-              <input type="text" name="address" value={contactForm.address} onChange={handleContactChange} />
-            </div>
-            <div className="form-group">
-              <label>Número</label>
-              <input type="number" name="address_number" value={contactForm.address_number} onChange={handleContactChange} />
-            </div>
-            <div className="form-group">
-              <label>Bairro</label>
-              <input type="text" name="neighborhood" value={contactForm.neighborhood} onChange={handleContactChange} />
-            </div>
-            <div className="form-group">
-              <label>País</label>
-              <select name="id_country" value={contactForm.id_country} onChange={handleContactChange}>
-                <option value="">— Selecione —</option>
-                {countries.map(c => (
-                  <option key={c.id_country} value={c.id_country}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Estado</label>
-              <select name="id_state" value={contactForm.id_state} onChange={handleContactChange} disabled={!contactForm.id_country}>
-                <option value="">— Selecione —</option>
-                {states
-                  .filter(s => String(s.id_country) === String(contactForm.id_country))
-                  .map(s => (
-                    <option key={s.id_state} value={s.id_state}>{s.abbreviation}</option>
-                  ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Cidade</label>
-              <select name="id_city" value={contactForm.id_city} onChange={handleContactChange} disabled={!contactForm.id_state}>
-                <option value="">— Selecione —</option>
-                {cities
-                  .filter(c => String(c.id_state) === String(contactForm.id_state))
-                  .map(c => (
-                    <option key={c.id_city} value={c.id_city}>{c.name}</option>
-                  ))}
-              </select>
-            </div>
-            {contactError && <p className="error">{contactError}</p>}
-            <div className="form-actions">
-              <button type="button" className="btn-novo" onClick={handleContactSave} disabled={contactSaving}>
-                {contactSaving ? 'Salvando...' : 'Salvar contato'}
-              </button>
-              <button type="button" onClick={() => setEditingContact(null)}>Cancelar</button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ── Vehicles section ─────────────────────────────────── */}
@@ -582,8 +554,117 @@ export function CustomerForm({ initialData, onSaved, onCancel }) {
             </div>
           )
         })}
-        {editingVehicle !== null && (
-          <div className="contact-editor">
+      </div>
+
+      {error && <p className="error">{error}</p>}
+      <div className="form-actions">
+        <button type="submit" className="btn-novo" disabled={saving}>{saving ? 'Salvando...' : 'Salvar'}</button>
+        <button type="button" onClick={onCancel}>Cancelar</button>
+      </div>
+    </form>
+    {editingContact !== null && createPortal(
+      <div className="form-modal-overlay" onClick={() => setEditingContact(null)}>
+        <div className="form-modal" onClick={e => e.stopPropagation()}>
+          <div className="form-modal-header">
+            <span>{(editingContact.id_contact || editingContact._tempId) ? 'Editar Contato' : 'Novo Contato'}</span>
+            <button className="modal-close" type="button" onClick={() => setEditingContact(null)}>✕</button>
+          </div>
+          <form onSubmit={e => { e.preventDefault(); e.stopPropagation(); handleContactSave() }} className="crud-form">
+            <div className="form-group">
+              <label>Celular</label>
+              <input type="text" name="mobile_phone" value={contactForm.mobile_phone} onChange={handleContactChange} autoFocus />
+            </div>
+            <div className="form-group form-group-check">
+              <label>
+                <input type="checkbox" name="is_mobile_phone_whatsapp" checked={contactForm.is_mobile_phone_whatsapp} onChange={handleContactChange} />
+                {' '}WhatsApp
+              </label>
+            </div>
+            <div className="form-group">
+              <label>E-mail</label>
+              <input type="email" name="email" value={contactForm.email} onChange={handleContactChange} />
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+            <div className="form-group" style={{ flex: 3, minWidth: 0 }}>
+              <label>Endereço</label>
+              <input type="text" name="address" value={contactForm.address} onChange={handleContactChange} />
+            </div>
+            <div className="form-group" style={{ flex: 1, minWidth: 0 }}>
+              <label>Número</label>
+              <input type="number" name="address_number" value={contactForm.address_number} onChange={handleContactChange} />
+            </div>
+            <div className="form-group" style={{ flex: 2, minWidth: 0 }}>
+              <label>Bairro</label>
+              <input type="text" name="neighborhood" value={contactForm.neighborhood} onChange={handleContactChange} />
+            </div>
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+            <div className="form-group" style={{ flex: 1, minWidth: 0 }}>
+              <label>País</label>
+              <select name="id_country" value={contactForm.id_country} onChange={handleContactChange}>
+                <option value="">— Selecione —</option>
+                {countries.map(c => (
+                  <option key={c.id_country} value={c.id_country}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group" style={{ flex: 1, minWidth: 0 }}>
+              <label>Estado</label>
+              <select name="id_state" value={contactForm.id_state} onChange={handleContactChange} disabled={!contactForm.id_country}>
+                <option value="">— Selecione —</option>
+                {states
+                  .filter(s => String(s.id_country) === String(contactForm.id_country))
+                  .map(s => (
+                    <option key={s.id_state} value={s.id_state}>{s.abbreviation}</option>
+                  ))}
+              </select>
+            </div>
+            <div className="form-group" style={{ flex: 1, minWidth: 0 }}>
+              <label>Cidade</label>
+              <select name="id_city" value={contactForm.id_city} onChange={handleContactChange} disabled={!contactForm.id_state}>
+                <option value="">— Selecione —</option>
+                {cities
+                  .filter(c => String(c.id_state) === String(contactForm.id_state))
+                  .map(c => (
+                    <option key={c.id_city} value={c.id_city}>{c.name}</option>
+                  ))}
+              </select>
+            </div>
+            </div>
+            {contactError && <p className="error">{contactError}</p>}
+            <div className="form-actions">
+              <button type="submit" className="btn-novo" disabled={contactSaving}>
+                {contactSaving ? 'Salvando...' : 'Salvar contato'}
+              </button>
+              <button type="button" onClick={() => setEditingContact(null)}>Cancelar</button>
+            </div>
+          </form>
+        </div>
+      </div>,
+      document.body
+    )}
+    {editingVehicle !== null && createPortal(
+      <div className="form-modal-overlay" onClick={() => setEditingVehicle(null)}>
+        <div className="form-modal" onClick={e => e.stopPropagation()}>
+          <div className="form-modal-header">
+            <span>{(editingVehicle.id_customer_model || editingVehicle._tempId) ? 'Editar Veículo' : 'Novo Veículo'}</span>
+            <button className="modal-close" type="button" onClick={() => setEditingVehicle(null)}>✕</button>
+          </div>
+          <form onSubmit={e => { e.preventDefault(); e.stopPropagation(); handleVehicleSave() }} className="crud-form">
+            <div className="form-group">
+              <label>Placa</label>
+              <div className="plate-search-field">
+                <input type="text" name="plate" value={vehicleForm.plate} onChange={handleVehicleChange} autoFocus />
+                <button
+                  type="button"
+                  className="btn-plate-search"
+                  onClick={handleLookupVehiclePlate}
+                  disabled={lookingUpPlate || !vehicleForm.plate.trim()}
+                  title="Buscar dados do veículo pela placa"
+                >{lookingUpPlate ? '⏳' : '🔍'}</button>
+              </div>
+              {plateLookupError && <p className="error">{plateLookupError}</p>}
+            </div>
             <div className="form-group">
               <label>Marca</label>
               <select name="id_make" value={vehicleForm.id_make} onChange={handleVehicleChange}>
@@ -621,10 +702,6 @@ export function CustomerForm({ initialData, onSaved, onCancel }) {
               </select>
             </div>
             <div className="form-group">
-              <label>Placa</label>
-              <input type="text" name="plate" value={vehicleForm.plate} onChange={handleVehicleChange} autoFocus />
-            </div>
-            <div className="form-group">
               <label>Ano Fabricação</label>
               <input type="number" name="year_make" value={vehicleForm.year_make} onChange={handleVehicleChange} />
             </div>
@@ -642,21 +719,19 @@ export function CustomerForm({ initialData, onSaved, onCancel }) {
             </div>
             {vehicleError && <p className="error">{vehicleError}</p>}
             <div className="form-actions">
-              <button type="button" className="btn-novo" onClick={handleVehicleSave} disabled={vehicleSaving}>
+              <button type="submit" className="btn-novo" disabled={vehicleSaving}>
                 {vehicleSaving ? 'Salvando...' : 'Salvar veículo'}
               </button>
+              {!(editingVehicle.id_customer_model || editingVehicle._tempId) && (
+                <button type="button" onClick={handleClearVehicleForm} disabled={vehicleSaving}>Limpar</button>
+              )}
               <button type="button" onClick={() => setEditingVehicle(null)}>Cancelar</button>
             </div>
-          </div>
-        )}
-      </div>
-
-      {error && <p className="error">{error}</p>}
-      <div className="form-actions">
-        <button type="submit" className="btn-novo" disabled={saving}>{saving ? 'Salvando...' : 'Salvar'}</button>
-        <button type="button" onClick={onCancel}>Cancelar</button>
-      </div>
-    </form>
+          </form>
+        </div>
+      </div>,
+      document.body
+    )}
     {showNewModelForm && createPortal(
       <div className="form-modal-overlay" onClick={() => { setShowNewModelForm(false); setNewModelError(null) }}>
         <div className="form-modal" onClick={e => e.stopPropagation()}>
@@ -710,6 +785,7 @@ export default function CustomerPage() {
       FormComponent={CustomerForm}
       filterKeys={['trade_name', 'individual_name', 'tax_id']}
       filterPlaceholder="Filtrar por nome fantasia, nome ou CPF/CNPJ..."
+      persistSearch={false}
       pageSize={15}
       basePath="/customers"
     />

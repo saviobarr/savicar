@@ -850,6 +850,7 @@ export default function InventoryPage() {
         FormComponent={InventoryForm}
         filterKeys={['name', 'code', 'storage_location']}
         filterPlaceholder="Filtrar por nome, código ou local..."
+        persistSearch={false}
         pageSize={15}
         basePath="/inventory"
         extraActions={

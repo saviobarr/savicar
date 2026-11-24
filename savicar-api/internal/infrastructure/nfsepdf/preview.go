@@ -25,6 +25,7 @@ type dpsPayload struct {
 	RegimeTributarioSimplesNacional   string `json:"regime_tributario_simples_nacional"`
 	RegimeEspecialTributacao          string `json:"regime_especial_tributacao"`
 	CnpjTomador                       string `json:"cnpj_tomador"`
+	CpfTomador                        string `json:"cpf_tomador"`
 	RazaoSocialTomador                string `json:"razao_social_tomador"`
 	CodigoMunicipioPrestacao          string `json:"codigo_municipio_prestacao"`
 	CodigoTributacaoNacionalIss       string `json:"codigo_tributacao_nacional_iss"`
@@ -201,9 +202,13 @@ func render(d dpsPayload, pr nfse.PrestadorContato) ([]byte, error) {
 	y += 3
 
 	// ── Tomador ──────────────────────────────────────────────────
+	tomadorDoc := d.CnpjTomador
+	if tomadorDoc == "" {
+		tomadorDoc = d.CpfTomador
+	}
 	y = sectionTitle(pdf, x, y, "TOMADOR / ADQUIRENTE")
 	y = row(pdf, x, y, 9, []col{
-		{w: contentW * 0.4, label: "CNPJ / CPF / NIF", value: formatCpfCnpj(d.CnpjTomador)},
+		{w: contentW * 0.4, label: "CNPJ / CPF / NIF", value: formatCpfCnpj(tomadorDoc)},
 		{w: contentW * 0.6, label: "NOME / NOME EMPRESARIAL", value: d.RazaoSocialTomador},
 	})
 	y += 3

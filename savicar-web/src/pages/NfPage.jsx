@@ -15,6 +15,12 @@ import {
   fetchAllCity,
   fetchAllState,
 } from '../api'
+import { serverTodayISO } from '../serverClock'
+
+async function fetchAllNfSorted() {
+  const items = await fetchAllNf()
+  return [...(items ?? [])].sort((a, b) => String(b.data_emissao ?? '').localeCompare(String(a.data_emissao ?? '')))
+}
 
 function fmtCurrency(val) {
   const n = Number(val)
@@ -30,7 +36,7 @@ function fmtDate(val) {
 }
 
 function today() {
-  return new Date().toISOString().slice(0, 10)
+  return serverTodayISO()
 }
 
 const UF_OPTIONS = [
@@ -626,7 +632,7 @@ export default function NfPage() {
   return (
     <CrudPage
       title="📄 Notas Fiscais"
-      fetchAll={fetchAllNf}
+      fetchAll={fetchAllNfSorted}
       deleteItem={deleteNf}
       fields={FIELDS}
       FormComponent={NfForm}

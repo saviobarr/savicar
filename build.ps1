@@ -18,7 +18,7 @@ cd "$PSScriptRoot\savicar-web"
 npm run build | Out-Null
 
 Write-Host "==> Building badencar-web frontend..."
-cd "$PSScriptRoot\..\badencar\badencar-web"
+cd "$PSScriptRoot\badencar-web"
 npm run build | Out-Null
 
 # Generate .ico from embedded logo and embed as Windows resource (.syso)
@@ -39,7 +39,7 @@ go build -ldflags "-H windowsgui -s -w" -o "$outDir\savicar\savicar.exe" .
 # ── badencar package ─────────────────────────────────────────────
 Write-Host "==> Packaging badencar..."
 Remove-Item -Recurse -Force "$apiDir\dist" -ErrorAction SilentlyContinue
-Copy-Item -Recurse "$PSScriptRoot\..\badencar\badencar-web\dist" "$apiDir\dist"
+Copy-Item -Recurse "$PSScriptRoot\badencar-web\dist" "$apiDir\dist"
 
 New-Item -ItemType Directory -Force "$outDir\badencar" | Out-Null
 cd $apiDir

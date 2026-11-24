@@ -1,10 +1,11 @@
-﻿package handler
+package handler
 
 import (
 	"database/sql"
 	"net/http"
 	"os"
 	"time"
+	_ "time/tzdata" // bundled so APP_TIMEZONE works on hosts without a zoneinfo database (Windows)
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -31,7 +32,30 @@ func jwtSecret() []byte {
 	return []byte("savicar-default-secret-change-in-prod")
 }
 
+// appLocation is the timezone used for the server clock handed to the frontend
+// (APP_TIMEZONE, default America/Sao_Paulo; falls back to the host's local zone).
+func appLocation() *time.Location {
+	name := os.Getenv("APP_TIMEZONE")
+	if name == "" {
+		name = "America/Sao_Paulo"
+	}
+	if loc, err := time.LoadLocation(name); err == nil {
+		return loc
+	}
+	return time.Local
+}
+
 func RegisterAuthRoutes(r *gin.Engine, db *sql.DB) {
+	// The server's clock, so screens don't depend on each machine's (possibly wrong) local time.
+	// "now" has the same shape as an <input type="datetime-local"> value (yyyy-mm-ddThh:mm).
+	r.GET("/auth/server-time", func(c *gin.Context) {
+		now := time.Now().In(appLocation())
+		c.JSON(http.StatusOK, gin.H{
+			"now": now.Format("2006-01-02T15:04"),
+			"iso": now.Format(time.RFC3339),
+		})
+	})
+
 	r.POST("/auth/login", func(c *gin.Context) {
 		var req loginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {

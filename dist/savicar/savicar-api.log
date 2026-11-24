@@ -1,0 +1,226 @@
+Arquivo .env não encontrado, usando variáveis de ambiente ou valores padrão.
+[GIN-debug] [WARNING] Creating an Engine instance with the Logger and Recovery middleware already attached.
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] POST   /auth/login               --> savicar-api/internal/infrastructure/http/handler.RegisterAuthRoutes.func1 (5 handlers)
+[GIN-debug] POST   /auth/bootstrap           --> savicar-api/internal/infrastructure/http/handler.RegisterAuthRoutes.func2 (5 handlers)
+[GIN-debug] GET    /tenant-config/logo       --> savicar-api/internal/infrastructure/http/handler.(*TenantConfigHandler).logo-fm (5 handlers)
+[GIN-debug] GET    /swagger/*any             --> github.com/swaggo/gin-swagger.CustomWrapHandler.func1 (5 handlers)
+[GIN-debug] GET    /health                   --> main.main.func1 (5 handlers)
+[GIN-debug] GET    /assets/*filepath         --> main.main.func2 (5 handlers)
+[GIN-debug] GET    /service-order-images     --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderImageHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /service-order-images/order/:id_order --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderImageHandler).getByOrderID-fm (7 handlers)
+[GIN-debug] GET    /service-order-images/order/:id_order/image --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderImageHandler).getImageByOrderID-fm (7 handlers)
+[GIN-debug] GET    /service-order-images/:id/file --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderImageHandler).serveImageFile-fm (7 handlers)
+[GIN-debug] GET    /service-order-images/:id --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderImageHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /service-order-images     --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderImageHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /service-order-images/:id --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderImageHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /service-order-images/:id --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderImageHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /product-images/product/:id_product --> savicar-api/internal/infrastructure/http/handler.(*ProductImageHandler).getByProductID-fm (7 handlers)
+[GIN-debug] GET    /product-images/:id/file  --> savicar-api/internal/infrastructure/http/handler.(*ProductImageHandler).serveFile-fm (7 handlers)
+[GIN-debug] POST   /product-images           --> savicar-api/internal/infrastructure/http/handler.(*ProductImageHandler).create-fm (7 handlers)
+[GIN-debug] DELETE /product-images/:id       --> savicar-api/internal/infrastructure/http/handler.(*ProductImageHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /makes                    --> savicar-api/internal/infrastructure/http/handler.(*VehicleMakeHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /makes/:id                --> savicar-api/internal/infrastructure/http/handler.(*VehicleMakeHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /makes                    --> savicar-api/internal/infrastructure/http/handler.(*VehicleMakeHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /makes/:id                --> savicar-api/internal/infrastructure/http/handler.(*VehicleMakeHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /makes/:id                --> savicar-api/internal/infrastructure/http/handler.(*VehicleMakeHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /fuels                    --> savicar-api/internal/infrastructure/http/handler.(*FuelHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /fuels/:id                --> savicar-api/internal/infrastructure/http/handler.(*FuelHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /fuels                    --> savicar-api/internal/infrastructure/http/handler.(*FuelHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /fuels/:id                --> savicar-api/internal/infrastructure/http/handler.(*FuelHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /fuels/:id                --> savicar-api/internal/infrastructure/http/handler.(*FuelHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /technicians              --> savicar-api/internal/infrastructure/http/handler.(*TechnicianHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /technicians/:id          --> savicar-api/internal/infrastructure/http/handler.(*TechnicianHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /technicians              --> savicar-api/internal/infrastructure/http/handler.(*TechnicianHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /technicians/:id          --> savicar-api/internal/infrastructure/http/handler.(*TechnicianHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /technicians/:id          --> savicar-api/internal/infrastructure/http/handler.(*TechnicianHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /models                   --> savicar-api/internal/infrastructure/http/handler.(*VehicleModelHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /models/:id               --> savicar-api/internal/infrastructure/http/handler.(*VehicleModelHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /models                   --> savicar-api/internal/infrastructure/http/handler.(*VehicleModelHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /models/:id               --> savicar-api/internal/infrastructure/http/handler.(*VehicleModelHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /models/:id               --> savicar-api/internal/infrastructure/http/handler.(*VehicleModelHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /customers                --> savicar-api/internal/infrastructure/http/handler.(*CustomerHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /customers/:id            --> savicar-api/internal/infrastructure/http/handler.(*CustomerHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /customers                --> savicar-api/internal/infrastructure/http/handler.(*CustomerHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /customers/:id            --> savicar-api/internal/infrastructure/http/handler.(*CustomerHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /customers/:id            --> savicar-api/internal/infrastructure/http/handler.(*CustomerHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /contacts                 --> savicar-api/internal/infrastructure/http/handler.(*ContactHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /contacts/:id             --> savicar-api/internal/infrastructure/http/handler.(*ContactHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /contacts                 --> savicar-api/internal/infrastructure/http/handler.(*ContactHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /contacts/:id             --> savicar-api/internal/infrastructure/http/handler.(*ContactHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /contacts/:id             --> savicar-api/internal/infrastructure/http/handler.(*ContactHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /customer-models          --> savicar-api/internal/infrastructure/http/handler.(*CustomerModelHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /customer-models/:id      --> savicar-api/internal/infrastructure/http/handler.(*CustomerModelHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /customer-models          --> savicar-api/internal/infrastructure/http/handler.(*CustomerModelHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /customer-models/:id      --> savicar-api/internal/infrastructure/http/handler.(*CustomerModelHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /customer-models/:id      --> savicar-api/internal/infrastructure/http/handler.(*CustomerModelHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /inventory                --> savicar-api/internal/infrastructure/http/handler.(*InventoryHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /inventory/barcode/:code  --> savicar-api/internal/infrastructure/http/handler.(*InventoryHandler).getByBarcode-fm (7 handlers)
+[GIN-debug] GET    /inventory/external-lookup/:code --> savicar-api/internal/infrastructure/http/handler.(*InventoryHandler).getExternalLookup-fm (7 handlers)
+[GIN-debug] GET    /inventory/:id            --> savicar-api/internal/infrastructure/http/handler.(*InventoryHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /inventory                --> savicar-api/internal/infrastructure/http/handler.(*InventoryHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /inventory/:id            --> savicar-api/internal/infrastructure/http/handler.(*InventoryHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /inventory/:id            --> savicar-api/internal/infrastructure/http/handler.(*InventoryHandler).delete-fm (7 handlers)
+[GIN-debug] POST   /inventory/:id/adjust     --> savicar-api/internal/infrastructure/http/handler.(*InventoryHandler).adjustQuantity-fm (7 handlers)
+[GIN-debug] GET    /unities                  --> savicar-api/internal/infrastructure/http/handler.(*UnityHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /unities/:id              --> savicar-api/internal/infrastructure/http/handler.(*UnityHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /unities                  --> savicar-api/internal/infrastructure/http/handler.(*UnityHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /unities/:id              --> savicar-api/internal/infrastructure/http/handler.(*UnityHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /unities/:id              --> savicar-api/internal/infrastructure/http/handler.(*UnityHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /resources                --> savicar-api/internal/infrastructure/http/handler.(*ResourceHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /resources/:id            --> savicar-api/internal/infrastructure/http/handler.(*ResourceHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /resources                --> savicar-api/internal/infrastructure/http/handler.(*ResourceHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /resources/:id            --> savicar-api/internal/infrastructure/http/handler.(*ResourceHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /resources/:id            --> savicar-api/internal/infrastructure/http/handler.(*ResourceHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /appointments             --> savicar-api/internal/infrastructure/http/handler.(*ServiceAppointmentHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /appointments/:id         --> savicar-api/internal/infrastructure/http/handler.(*ServiceAppointmentHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /appointments             --> savicar-api/internal/infrastructure/http/handler.(*ServiceAppointmentHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /appointments/:id         --> savicar-api/internal/infrastructure/http/handler.(*ServiceAppointmentHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /appointments/:id         --> savicar-api/internal/infrastructure/http/handler.(*ServiceAppointmentHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /appointment-resources/by-appointment/:id --> savicar-api/internal/infrastructure/http/handler.(*ServiceAppointmentResourceHandler).getByAppointment-fm (7 handlers)
+[GIN-debug] GET    /appointment-resources/:id --> savicar-api/internal/infrastructure/http/handler.(*ServiceAppointmentResourceHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /appointment-resources    --> savicar-api/internal/infrastructure/http/handler.(*ServiceAppointmentResourceHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /appointment-resources/:id --> savicar-api/internal/infrastructure/http/handler.(*ServiceAppointmentResourceHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /appointment-resources/:id --> savicar-api/internal/infrastructure/http/handler.(*ServiceAppointmentResourceHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /service-orders           --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /service-orders/:id       --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /service-orders           --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /service-orders/:id       --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /service-orders/:id       --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /services                 --> savicar-api/internal/infrastructure/http/handler.(*ServicesHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /services/:id             --> savicar-api/internal/infrastructure/http/handler.(*ServicesHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /services                 --> savicar-api/internal/infrastructure/http/handler.(*ServicesHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /services/:id             --> savicar-api/internal/infrastructure/http/handler.(*ServicesHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /services/:id             --> savicar-api/internal/infrastructure/http/handler.(*ServicesHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /service-order-products   --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderProductsHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /service-order-products/order/:order_id --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderProductsHandler).getByOrderID-fm (7 handlers)
+[GIN-debug] GET    /service-order-products/:id --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderProductsHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /service-order-products   --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderProductsHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /service-order-products/:id --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderProductsHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /service-order-products/:id --> savicar-api/internal/infrastructure/http/handler.(*ServiceOrderProductsHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /payment-methods          --> savicar-api/internal/infrastructure/http/handler.(*PaymentMethodHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /payments                 --> savicar-api/internal/infrastructure/http/handler.(*PaymentHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /payments/:id             --> savicar-api/internal/infrastructure/http/handler.(*PaymentHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /payments                 --> savicar-api/internal/infrastructure/http/handler.(*PaymentHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /payments/:id             --> savicar-api/internal/infrastructure/http/handler.(*PaymentHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /payments/:id             --> savicar-api/internal/infrastructure/http/handler.(*PaymentHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /payments/order/:order_id --> savicar-api/internal/infrastructure/http/handler.(*PaymentHandler).getByOrderID-fm (7 handlers)
+[GIN-debug] GET    /countries                --> savicar-api/internal/infrastructure/http/handler.(*CountryHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /countries/:id            --> savicar-api/internal/infrastructure/http/handler.(*CountryHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /countries                --> savicar-api/internal/infrastructure/http/handler.(*CountryHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /countries/:id            --> savicar-api/internal/infrastructure/http/handler.(*CountryHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /countries/:id            --> savicar-api/internal/infrastructure/http/handler.(*CountryHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /nf                       --> savicar-api/internal/infrastructure/http/handler.(*NFHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /nf/next-numero           --> savicar-api/internal/infrastructure/http/handler.(*NFHandler).nextNumero-fm (7 handlers)
+[GIN-debug] GET    /nf/:id                   --> savicar-api/internal/infrastructure/http/handler.(*NFHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /nf                       --> savicar-api/internal/infrastructure/http/handler.(*NFHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /nf/:id                   --> savicar-api/internal/infrastructure/http/handler.(*NFHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /nf/:id                   --> savicar-api/internal/infrastructure/http/handler.(*NFHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /produtos-nf              --> savicar-api/internal/infrastructure/http/handler.(*ProdutosNfHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /produtos-nf/nf/:nf_id    --> savicar-api/internal/infrastructure/http/handler.(*ProdutosNfHandler).getByNfID-fm (7 handlers)
+[GIN-debug] GET    /produtos-nf/:id          --> savicar-api/internal/infrastructure/http/handler.(*ProdutosNfHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /produtos-nf              --> savicar-api/internal/infrastructure/http/handler.(*ProdutosNfHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /produtos-nf/:id          --> savicar-api/internal/infrastructure/http/handler.(*ProdutosNfHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /produtos-nf/:id          --> savicar-api/internal/infrastructure/http/handler.(*ProdutosNfHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /states                   --> savicar-api/internal/infrastructure/http/handler.(*StateHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /states/:id               --> savicar-api/internal/infrastructure/http/handler.(*StateHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /states                   --> savicar-api/internal/infrastructure/http/handler.(*StateHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /states/:id               --> savicar-api/internal/infrastructure/http/handler.(*StateHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /states/:id               --> savicar-api/internal/infrastructure/http/handler.(*StateHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /cities                   --> savicar-api/internal/infrastructure/http/handler.(*CityHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /cities/:id               --> savicar-api/internal/infrastructure/http/handler.(*CityHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /cities                   --> savicar-api/internal/infrastructure/http/handler.(*CityHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /cities/:id               --> savicar-api/internal/infrastructure/http/handler.(*CityHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /cities/:id               --> savicar-api/internal/infrastructure/http/handler.(*CityHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /operational-costs        --> savicar-api/internal/infrastructure/http/handler.(*OperationalCostsHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /operational-costs/:id    --> savicar-api/internal/infrastructure/http/handler.(*OperationalCostsHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /operational-costs        --> savicar-api/internal/infrastructure/http/handler.(*OperationalCostsHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /operational-costs/:id    --> savicar-api/internal/infrastructure/http/handler.(*OperationalCostsHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /operational-costs/:id    --> savicar-api/internal/infrastructure/http/handler.(*OperationalCostsHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /cost-categories          --> savicar-api/internal/infrastructure/http/handler.(*CostCategoryHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /cost-categories/:id      --> savicar-api/internal/infrastructure/http/handler.(*CostCategoryHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /cost-categories          --> savicar-api/internal/infrastructure/http/handler.(*CostCategoryHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /cost-categories/:id      --> savicar-api/internal/infrastructure/http/handler.(*CostCategoryHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /cost-categories/:id      --> savicar-api/internal/infrastructure/http/handler.(*CostCategoryHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /reports/financial/daily  --> savicar-api/internal/infrastructure/http/handler.(*FinancialReportHandler).daily-fm (7 handlers)
+[GIN-debug] GET    /tenant-config            --> savicar-api/internal/infrastructure/http/handler.(*TenantConfigHandler).get-fm (7 handlers)
+[GIN-debug] PUT    /tenant-config            --> savicar-api/internal/infrastructure/http/handler.(*TenantConfigHandler).update-fm (7 handlers)
+[GIN-debug] POST   /tenant-config/logo       --> savicar-api/internal/infrastructure/http/handler.(*TenantConfigHandler).uploadLogo-fm (7 handlers)
+[GIN-debug] POST   /whatsapp/create-instance --> savicar-api/internal/infrastructure/http/handler.(*WhatsAppHandler).createInstance-fm (7 handlers)
+[GIN-debug] GET    /whatsapp/status          --> savicar-api/internal/infrastructure/http/handler.(*WhatsAppHandler).status-fm (7 handlers)
+[GIN-debug] POST   /whatsapp/confirm         --> savicar-api/internal/infrastructure/http/handler.(*WhatsAppHandler).confirm-fm (7 handlers)
+[GIN-debug] POST   /whatsapp/send-order      --> savicar-api/internal/infrastructure/http/handler.(*WhatsAppHandler).sendOrder-fm (7 handlers)
+[GIN-debug] POST   /whatsapp/send-images     --> savicar-api/internal/infrastructure/http/handler.(*WhatsAppHandler).sendImages-fm (7 handlers)
+[GIN-debug] DELETE /whatsapp/disconnect      --> savicar-api/internal/infrastructure/http/handler.(*WhatsAppHandler).disconnect-fm (7 handlers)
+[GIN-debug] POST   /nfse/emitir              --> savicar-api/internal/infrastructure/http/handler.(*NfseHandler).emitir-fm (7 handlers)
+[GIN-debug] GET    /nfse/emitir/:ref         --> savicar-api/internal/infrastructure/http/handler.(*NfseHandler).consultar-fm (7 handlers)
+[GIN-debug] POST   /nfse/preview             --> savicar-api/internal/infrastructure/http/handler.(*NfseHandler).preview-fm (7 handlers)
+[GIN-debug] GET    /vehicle-lookup/:plate    --> savicar-api/internal/infrastructure/http/handler.(*VehicleLookupHandler).lookup-fm (7 handlers)
+[GIN-debug] GET    /users                    --> savicar-api/internal/infrastructure/http/handler.(*UserHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /users/:id                --> savicar-api/internal/infrastructure/http/handler.(*UserHandler).getByID-fm (7 handlers)
+[GIN-debug] POST   /users                    --> savicar-api/internal/infrastructure/http/handler.(*UserHandler).create-fm (7 handlers)
+[GIN-debug] PUT    /users/:id                --> savicar-api/internal/infrastructure/http/handler.(*UserHandler).update-fm (7 handlers)
+[GIN-debug] DELETE /users/:id                --> savicar-api/internal/infrastructure/http/handler.(*UserHandler).delete-fm (7 handlers)
+[GIN-debug] GET    /audit                    --> savicar-api/internal/infrastructure/http/handler.(*AuditHandler).getAll-fm (7 handlers)
+[GIN-debug] GET    /notifications            --> savicar-api/internal/infrastructure/http/handler.(*NotificationHandler).list-fm (7 handlers)
+[GIN-debug] GET    /notifications/unread-count --> savicar-api/internal/infrastructure/http/handler.(*NotificationHandler).unreadCount-fm (7 handlers)
+[GIN-debug] PUT    /notifications/:id/read   --> savicar-api/internal/infrastructure/http/handler.(*NotificationHandler).markRead-fm (7 handlers)
+[GIN-debug] PUT    /notifications/read-all   --> savicar-api/internal/infrastructure/http/handler.(*NotificationHandler).markAllRead-fm (7 handlers)
+[GIN-debug] Listening and serving HTTP on :8080
+time=2026-09-16T18:54:59.005-03:00 level=INFO msg="discovery listener started" port=9999
+[GIN] 2026/09/16 - 18:54:59 | 200 |  72.01ms |             ::1 | GET      "/index.html"
+[GIN] 2026/09/16 - 18:54:59 | 200 |  517.3µs |             ::1 | GET      "/"
+[GIN] 2026/09/16 - 18:55:00 | 200 |  509.9µs |             ::1 | GET      "/assets/index-CdKnrDGG.js"
+[GIN] 2026/09/16 - 18:55:00 | 200 |       0s |             ::1 | GET      "/assets/index-DL9nkAJY.css"
+[GIN] 2026/09/16 - 18:55:00 | 200 |   3.07ms |             ::1 | GET      "/tenant-config/logo"
+[GIN] 2026/09/16 - 18:55:00 | 200 |  21.58ms |             ::1 | GET      "/notifications"
+[GIN] 2026/09/16 - 18:55:00 | 200 |    1.8ms |             ::1 | GET      "/service-orders"
+[GIN] 2026/09/16 - 18:55:00 | 200 |      3ms |             ::1 | GET      "/tenant-config"
+[GIN] 2026/09/16 - 18:55:10 | 200 |   1.08ms |             ::1 | GET      "/customer-models"
+[GIN] 2026/09/16 - 18:55:10 | 200 |   1.08ms |             ::1 | GET      "/customers"
+[GIN] 2026/09/16 - 18:55:10 | 200 |       0s |             ::1 | GET      "/technicians"
+[GIN] 2026/09/16 - 18:55:10 | 200 |  543.1µs |             ::1 | GET      "/payment-methods"
+[GIN] 2026/09/16 - 18:55:10 | 200 |   1.11ms |             ::1 | GET      "/inventory"
+[GIN] 2026/09/16 - 18:55:10 | 200 |   15.6ms |             ::1 | GET      "/makes"
+[GIN] 2026/09/16 - 18:55:20 | 200 |   5.42ms |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:55:40 | 200 |  550.6µs |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:56:00 | 200 |   1.31ms |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:56:20 | 200 |  757.1µs |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:56:40 | 200 |  662.7µs |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:57:00 | 200 |   3.15ms |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:57:20 | 200 |  518.1µs |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:58:06 | 200 |  719.8µs |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:58:13 | 200 |       0s |             ::1 | GET      "/"
+[GIN] 2026/09/16 - 18:58:13 | 200 |  505.7µs |             ::1 | GET      "/assets/index-CdKnrDGG.js"
+[GIN] 2026/09/16 - 18:58:13 | 200 |       0s |             ::1 | GET      "/assets/index-DL9nkAJY.css"
+[GIN] 2026/09/16 - 18:58:13 | 200 |       0s |             ::1 | GET      "/favicon.svg"
+[GIN] 2026/09/16 - 18:58:13 | 200 |       0s |             ::1 | GET      "/favicon.ico"
+[GIN] 2026/09/16 - 18:58:13 | 200 |   3.69ms |             ::1 | GET      "/tenant-config/logo"
+[GIN] 2026/09/16 - 18:58:19 | 200 |  55.67ms |             ::1 | POST     "/auth/login"
+[GIN] 2026/09/16 - 18:58:19 | 200 |       0s |             ::1 | GET      "/favicon.ico"
+[GIN] 2026/09/16 - 18:58:19 | 200 |   2.27ms |             ::1 | GET      "/tenant-config/logo"
+[GIN] 2026/09/16 - 18:58:19 | 200 |       0s |             ::1 | GET      "/favicon.ico"
+[GIN] 2026/09/16 - 18:58:19 | 200 |    512µs |             ::1 | GET      "/notifications"
+[GIN] 2026/09/16 - 18:58:19 | 200 |       0s |             ::1 | GET      "/tenant-config"
+[GIN] 2026/09/16 - 18:58:19 | 200 |   1.08ms |             ::1 | GET      "/service-orders"
+[GIN] 2026/09/16 - 18:58:23 | 200 |       0s |             ::1 | GET      "/favicon.ico"
+[GIN] 2026/09/16 - 18:58:23 | 200 |    845µs |             ::1 | GET      "/customers"
+[GIN] 2026/09/16 - 18:58:23 | 200 |  588.7µs |             ::1 | GET      "/customer-models"
+[GIN] 2026/09/16 - 18:58:23 | 200 |    695µs |             ::1 | GET      "/technicians"
+[GIN] 2026/09/16 - 18:58:23 | 200 |  505.2µs |             ::1 | GET      "/makes"
+[GIN] 2026/09/16 - 18:58:23 | 200 |   1.07ms |             ::1 | GET      "/inventory"
+[GIN] 2026/09/16 - 18:58:23 | 200 |  15.26ms |             ::1 | GET      "/payment-methods"
+[GIN] 2026/09/16 - 18:58:39 | 200 |  606.3µs |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:58:52 | 200 |  797.5µs |             ::1 | GET      "/makes"
+[GIN] 2026/09/16 - 18:58:52 | 200 |   5.26ms |             ::1 | GET      "/models"
+[GIN] 2026/09/16 - 18:58:59 | 200 |    1.7ms |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:59:04 | 200 |    2.11s |             ::1 | GET      "/vehicle-lookup/PJG1D93"
+[GIN] 2026/09/16 - 18:59:06 | 200 |  641.6µs |             ::1 | GET      "/notifications/unread-count"
+[GIN] 2026/09/16 - 18:59:12 | 200 |       0s |             ::1 | GET      "/favicon.ico"
+[GIN] 2026/09/16 - 18:59:12 | 200 |  511.1µs |             ::1 | GET      "/tenant-config"
+[GIN] 2026/09/16 - 18:59:12 | 200 |  511.1µs |             ::1 | GET      "/service-orders"
+[GIN] 2026/09/16 - 18:59:19 | 200 |    563µs |             ::1 | GET      "/notifications/unread-count"

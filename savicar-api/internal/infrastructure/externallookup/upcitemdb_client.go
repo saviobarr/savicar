@@ -45,6 +45,9 @@ func (c *UPCItemDBClient) Lookup(ctx context.Context, barcode string) (*inventor
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, inventory.ErrLookupQuotaExceeded
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("upcitemdb: unexpected status %d", resp.StatusCode)
 	}

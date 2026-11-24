@@ -1,5 +1,12 @@
 package nf
 
+// Tipo distinguishes what kind of nota fiscal a row represents.
+const (
+	TipoNFS = 1 // NFS-e — Nota Fiscal de Serviço
+	TipoNF  = 2 // NF-e — Nota Fiscal de Venda
+	TipoNFC = 3 // NFC-e — Nota Fiscal de Consumidor
+)
+
 type NF struct {
 	Numero              int     `json:"numero"`
 	Serie               *string `json:"serie"`
@@ -21,4 +28,7 @@ type NF struct {
 	ValorIpi            *string `json:"valor_ipi"`
 	ValorTotalProdutos  *string `json:"valor_total_produtos"`
 	ValorTotalNota      *string `json:"valor_total_nota"`
+	UrlDownload         *string `json:"url_download"`
+	Tomador             *string `json:"tomador"`
+	Tipo                *int    `json:"tipo"`
 }

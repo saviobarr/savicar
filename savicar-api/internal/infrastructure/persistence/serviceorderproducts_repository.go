@@ -21,7 +21,7 @@ func NewSQLServerServiceOrderProductsRepository(db *sql.DB) *SQLServerServiceOrd
 }
 
 func (r *SQLServerServiceOrderProductsRepository) FindAll(ctx context.Context) ([]serviceorderproducts.ServiceOrderProduct, error) {
-	query := "SELECT ID_SERVICE_ORDER_PRODUCT, ID_ORDER, ID_PRODUCT, QUANTITY FROM SERVICE_ORDER_PRODUCTS"
+	query := "SELECT ID_SERVICE_ORDER_PRODUCT, ID_ORDER, ID_PRODUCT, QUANTITY, COST_PRICE, SALES_PRICE FROM SERVICE_ORDER_PRODUCTS"
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		r.log.ErrorContext(ctx, "FindAll failed", slog.Any("error", err))
@@ -32,7 +32,7 @@ func (r *SQLServerServiceOrderProductsRepository) FindAll(ctx context.Context) (
 	var result []serviceorderproducts.ServiceOrderProduct
 	for rows.Next() {
 		var sop serviceorderproducts.ServiceOrderProduct
-		if err := rows.Scan(&sop.IDServiceOrderProduct, &sop.IDOrder, &sop.IDProduct, &sop.Quantity); err != nil {
+		if err := rows.Scan(&sop.IDServiceOrderProduct, &sop.IDOrder, &sop.IDProduct, &sop.Quantity, &sop.CostPrice, &sop.SalesPrice); err != nil {
 			return nil, err
 		}
 		result = append(result, sop)
@@ -41,9 +41,9 @@ func (r *SQLServerServiceOrderProductsRepository) FindAll(ctx context.Context) (
 }
 
 func (r *SQLServerServiceOrderProductsRepository) FindByID(ctx context.Context, id int) (*serviceorderproducts.ServiceOrderProduct, error) {
-	query := "SELECT ID_SERVICE_ORDER_PRODUCT, ID_ORDER, ID_PRODUCT, QUANTITY FROM SERVICE_ORDER_PRODUCTS WHERE ID_SERVICE_ORDER_PRODUCT = ?"
+	query := "SELECT ID_SERVICE_ORDER_PRODUCT, ID_ORDER, ID_PRODUCT, QUANTITY, COST_PRICE, SALES_PRICE FROM SERVICE_ORDER_PRODUCTS WHERE ID_SERVICE_ORDER_PRODUCT = ?"
 	var sop serviceorderproducts.ServiceOrderProduct
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&sop.IDServiceOrderProduct, &sop.IDOrder, &sop.IDProduct, &sop.Quantity)
+	err := r.db.QueryRowContext(ctx, query, id).Scan(&sop.IDServiceOrderProduct, &sop.IDOrder, &sop.IDProduct, &sop.Quantity, &sop.CostPrice, &sop.SalesPrice)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -55,7 +55,7 @@ func (r *SQLServerServiceOrderProductsRepository) FindByID(ctx context.Context, 
 }
 
 func (r *SQLServerServiceOrderProductsRepository) FindByOrderID(ctx context.Context, orderID int) ([]serviceorderproducts.ServiceOrderProduct, error) {
-	query := `SELECT sop.ID_SERVICE_ORDER_PRODUCT, sop.ID_ORDER, sop.ID_PRODUCT, sop.QUANTITY, inv.NAME
+	query := `SELECT sop.ID_SERVICE_ORDER_PRODUCT, sop.ID_ORDER, sop.ID_PRODUCT, sop.QUANTITY, sop.COST_PRICE, sop.SALES_PRICE, inv.NAME
 	 FROM SERVICE_ORDER_PRODUCTS sop
 	 LEFT JOIN INVENTORY inv ON inv.ID_PRODUCT = sop.ID_PRODUCT
 	 WHERE sop.ID_ORDER = ?`
@@ -69,7 +69,7 @@ func (r *SQLServerServiceOrderProductsRepository) FindByOrderID(ctx context.Cont
 	var result []serviceorderproducts.ServiceOrderProduct
 	for rows.Next() {
 		var sop serviceorderproducts.ServiceOrderProduct
-		if err := rows.Scan(&sop.IDServiceOrderProduct, &sop.IDOrder, &sop.IDProduct, &sop.Quantity, &sop.ProductName); err != nil {
+		if err := rows.Scan(&sop.IDServiceOrderProduct, &sop.IDOrder, &sop.IDProduct, &sop.Quantity, &sop.CostPrice, &sop.SalesPrice, &sop.ProductName); err != nil {
 			return nil, err
 		}
 		sop.ProductName = trimStringPtr(sop.ProductName)
@@ -79,9 +79,9 @@ func (r *SQLServerServiceOrderProductsRepository) FindByOrderID(ctx context.Cont
 }
 
 func (r *SQLServerServiceOrderProductsRepository) Create(ctx context.Context, sop *serviceorderproducts.ServiceOrderProduct) error {
-	query := "INSERT INTO SERVICE_ORDER_PRODUCTS (ID_ORDER, ID_PRODUCT, QUANTITY) VALUES (?, ?, ?)"
-	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{sop.IDOrder, sop.IDProduct, sop.Quantity}))
-	result, err := r.db.ExecContext(ctx, query, sop.IDOrder, sop.IDProduct, sop.Quantity)
+	query := "INSERT INTO SERVICE_ORDER_PRODUCTS (ID_ORDER, ID_PRODUCT, QUANTITY, COST_PRICE, SALES_PRICE) VALUES (?, ?, ?, ?, ?)"
+	r.log.InfoContext(ctx, "insert", slog.String("sql", query), slog.Any("args", []any{sop.IDOrder, sop.IDProduct, sop.Quantity, sop.CostPrice, sop.SalesPrice}))
+	result, err := r.db.ExecContext(ctx, query, sop.IDOrder, sop.IDProduct, sop.Quantity, sop.CostPrice, sop.SalesPrice)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Create failed", slog.Any("error", err))
 		return err
@@ -96,9 +96,9 @@ func (r *SQLServerServiceOrderProductsRepository) Create(ctx context.Context, so
 
 func (r *SQLServerServiceOrderProductsRepository) Update(ctx context.Context, sop *serviceorderproducts.ServiceOrderProduct) error {
 	query := `UPDATE SERVICE_ORDER_PRODUCTS
-	 SET ID_ORDER = ?, ID_PRODUCT = ?, QUANTITY = ?
+	 SET ID_ORDER = ?, ID_PRODUCT = ?, QUANTITY = ?, COST_PRICE = ?, SALES_PRICE = ?
 	 WHERE ID_SERVICE_ORDER_PRODUCT = ?`
-	_, err := r.db.ExecContext(ctx, query, sop.IDOrder, sop.IDProduct, sop.Quantity, sop.IDServiceOrderProduct)
+	_, err := r.db.ExecContext(ctx, query, sop.IDOrder, sop.IDProduct, sop.Quantity, sop.CostPrice, sop.SalesPrice, sop.IDServiceOrderProduct)
 	if err != nil {
 		r.log.ErrorContext(ctx, "Update failed", slog.Int("id", sop.IDServiceOrderProduct), slog.Any("error", err))
 	}

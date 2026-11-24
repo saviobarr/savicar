@@ -30,6 +30,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
@@ -50,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -72,6 +74,9 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import coil.ImageLoader
 import coil.compose.AsyncImage
+import com.example.myapplication.sync.Connectivity
+import com.example.myapplication.sync.SessionExpiryInterceptor
+import com.example.myapplication.sync.SessionManager
 import com.example.myapplication.ui.theme.SavicarTheme
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -80,6 +85,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -98,6 +104,7 @@ import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Part
 import retrofit2.http.Url
+import java.util.concurrent.TimeUnit
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -111,7 +118,8 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-private const val PREFS_NAME = "savicar_prefs"
+// Not private: read from SessionManager too.
+const val PREFS_NAME = "savicar_prefs"
 private const val DEFAULT_SERVER_URL = "http://10.0.2.2:8080"
 private const val BIOMETRIC_KEY_ALIAS = "savicar_biometric_key"
 private const val BIOMETRIC_TRANSFORMATION = "AES/GCM/NoPadding"
@@ -125,6 +133,7 @@ private sealed class Screen {
     data object Scanner : Screen()
     data object ServiceOrders : Screen()
     data object NewServiceOrder : Screen()
+    data object SimpleServiceOrder : Screen()
     data class ServiceOrderDetail(val order: ServiceOrderSummary) : Screen()
     data class ServiceOrderImages(val order: ServiceOrderSummary) : Screen()
     data object Settings : Screen()
@@ -139,6 +148,7 @@ private fun screenSaveState(screen: Screen): List<Any?> = when (screen) {
     is Screen.Scanner -> listOf("Scanner")
     is Screen.ServiceOrders -> listOf("ServiceOrders")
     is Screen.NewServiceOrder -> listOf("NewServiceOrder")
+    is Screen.SimpleServiceOrder -> listOf("SimpleServiceOrder")
     is Screen.Settings -> listOf("Settings")
     is Screen.ServiceOrderDetail -> listOf(
         "ServiceOrderDetail", screen.order.id_order, screen.order.customer_name,
@@ -162,6 +172,7 @@ private fun screenRestoreState(saved: List<Any?>): Screen {
         "Scanner" -> Screen.Scanner
         "ServiceOrders" -> Screen.ServiceOrders
         "NewServiceOrder" -> Screen.NewServiceOrder
+        "SimpleServiceOrder" -> Screen.SimpleServiceOrder
         "Settings" -> Screen.Settings
         "ServiceOrderDetail" -> Screen.ServiceOrderDetail(order())
         "ServiceOrderImages" -> Screen.ServiceOrderImages(order())
@@ -177,6 +188,20 @@ class MainActivity : FragmentActivity() {
     private val api: SavicarApi by lazy {
         Retrofit.Builder()
             .baseUrl("http://localhost/") // unused: every call supplies an absolute @Url
+            .client(
+                OkHttpClient.Builder()
+                    // OkHttp's own defaults (10s per phase) let a real request hang far
+                    // longer than the fast reachability precheck used elsewhere (see
+                    // Connectivity.kt) — on a weak/flaky connection (reachable but slow,
+                    // not fully offline) that leaves the UI spinner stuck for a long time
+                    // instead of failing fast. A short connect timeout catches "can't even
+                    // reach the server"; read/write stay generous enough for real requests.
+                    .connectTimeout(5, TimeUnit.SECONDS)
+                    .readTimeout(20, TimeUnit.SECONDS)
+                    .writeTimeout(20, TimeUnit.SECONDS)
+                    .addInterceptor(SessionExpiryInterceptor(applicationContext))
+                    .build(),
+            )
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(SavicarApi::class.java)
@@ -190,6 +215,18 @@ class MainActivity : FragmentActivity() {
             var token by remember { mutableStateOf(prefs.getString("token", null)) }
             var hasSavedBiometricLogin by remember { mutableStateOf(hasSavedBiometricCredentials()) }
             var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Home) }
+
+            // A 401 from any call (SessionExpiryInterceptor) already cleared the
+            // stored token — drop back to LoginScreen so biometric re-login is
+            // offered again instead of every screen just failing silently.
+            LaunchedEffect(Unit) {
+                SessionManager.expired.collect {
+                    if (token != null) {
+                        token = null
+                        Toast.makeText(this@MainActivity, "Sessão expirada, faça login novamente", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
 
             SavicarTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -244,6 +281,7 @@ class MainActivity : FragmentActivity() {
                             is Screen.Home -> HomeScreen(
                                 onSelectScanner = { screen = Screen.Scanner },
                                 onSelectServiceOrders = { screen = Screen.ServiceOrders },
+                                onSelectSimpleServiceOrder = { screen = Screen.SimpleServiceOrder },
                                 onSelectSettings = { screen = Screen.Settings },
                                 onLogout = {
                                     token = null
@@ -267,6 +305,13 @@ class MainActivity : FragmentActivity() {
                                 serverUrl = serverUrl,
                                 token = token!!,
                                 onBack = { screen = Screen.ServiceOrders },
+                                onCreated = { order -> screen = Screen.ServiceOrderImages(order) },
+                            )
+                            is Screen.SimpleServiceOrder -> SimpleServiceOrderScreen(
+                                serverUrl = serverUrl,
+                                token = token!!,
+                                onBack = { screen = Screen.Home },
+                                onUseFullForm = { screen = Screen.NewServiceOrder },
                                 onCreated = { order -> screen = Screen.ServiceOrderImages(order) },
                             )
                             is Screen.ServiceOrderDetail -> ServiceOrderEditScreen(
@@ -308,7 +353,7 @@ class MainActivity : FragmentActivity() {
                 Result.failure(Exception("Usuário ou senha inválidos"))
             }
         } catch (e: Exception) {
-            Result.failure(Exception("Não foi possível conectar ao servidor: ${e.message}"))
+            Result.failure(Exception("Sem conexão com o servidor. Tente novamente quando estiver online."))
         }
     }
 
@@ -511,7 +556,7 @@ class MainActivity : FragmentActivity() {
                     .padding(24.dp),
                 verticalArrangement = Arrangement.Center,
             ) {
-            Text(text = "Savicar — Leitor de Código de Barras", style = MaterialTheme.typography.headlineSmall)
+            Text(text = "Savicar — Gestão de Serviços", style = MaterialTheme.typography.headlineSmall)
             Spacer(modifier = Modifier.height(24.dp))
 
             if (error != null) {
@@ -653,6 +698,7 @@ class MainActivity : FragmentActivity() {
     private fun HomeScreen(
         onSelectScanner: () -> Unit,
         onSelectServiceOrders: () -> Unit,
+        onSelectSimpleServiceOrder: () -> Unit,
         onSelectSettings: () -> Unit,
         onLogout: () -> Unit,
     ) {
@@ -676,10 +722,11 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.weight(1f),
                 ) {
                     gridItems(
-                        listOf(
-                            Triple("📷", "Ler Código de Barras", onSelectScanner),
-                            Triple("🔧", "Ordens de Serviço", onSelectServiceOrders),
-                            Triple("⚙️", "Configurações", onSelectSettings),
+                        listOf<Triple<@Composable () -> Unit, String, () -> Unit>>(
+                            Triple({ Text(text = "📷", fontSize = 40.sp) }, "Ler Código de Barras", onSelectScanner),
+                            Triple({ Text(text = "🔧", fontSize = 40.sp) }, "Ordens de Serviço", onSelectServiceOrders),
+                            Triple({ PlateIcon() }, "Abrir OS pela Placa", onSelectSimpleServiceOrder),
+                            Triple({ Text(text = "⚙️", fontSize = 40.sp) }, "Configurações", onSelectSettings),
                         ),
                     ) { (icon, label, onClick) ->
                         HomeMenuCard(icon = icon, label = label, onClick = onClick)
@@ -773,7 +820,7 @@ class MainActivity : FragmentActivity() {
     }
 
     @Composable
-    private fun HomeMenuCard(icon: String, label: String, onClick: () -> Unit) {
+    private fun HomeMenuCard(icon: @Composable () -> Unit, label: String, onClick: () -> Unit) {
         Card(
             onClick = onClick,
             modifier = Modifier
@@ -787,9 +834,43 @@ class MainActivity : FragmentActivity() {
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(text = icon, fontSize = 40.sp)
+                icon()
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(text = label, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+            }
+        }
+    }
+
+    // A small drawn Mercosul plate, standing in for the car emoji on the
+    // "Abrir OS pela Placa" home card — the whole feature is about scanning a
+    // real plate, so the icon shows one instead of a generic car.
+    @Composable
+    private fun PlateIcon() {
+        Column(
+            modifier = Modifier
+                .width(74.dp)
+                .height(42.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.White)
+                .border(1.dp, Color.Black, RoundedCornerShape(6.dp)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(12.dp)
+                    .background(Color(0xFF1450A3)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(text = "BRASIL", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+            }
+            Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "BRA2E19",
+                    color = Color.Black,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
             }
         }
     }
@@ -800,6 +881,7 @@ class MainActivity : FragmentActivity() {
         var product by remember { mutableStateOf<InventoryProduct?>(null) }
         var externalSuggestion by remember { mutableStateOf<ExternalProduct?>(null) }
         var notFoundAnywhere by remember { mutableStateOf(false) }
+        var lookupQuotaExhausted by remember { mutableStateOf(false) }
         var serverUnreachable by remember { mutableStateOf(false) }
         var loading by remember { mutableStateOf(false) }
         var showRegisterDialog by remember { mutableStateOf(false) }
@@ -812,6 +894,7 @@ class MainActivity : FragmentActivity() {
             product = null
             externalSuggestion = null
             notFoundAnywhere = false
+            lookupQuotaExhausted = false
             serverUnreachable = false
         }
 
@@ -838,7 +921,10 @@ class MainActivity : FragmentActivity() {
                         loading = false
                         externalResult
                             .onSuccess { externalSuggestion = it }
-                            .onFailure { notFoundAnywhere = true }
+                            .onFailure {
+                                lookupQuotaExhausted = it is LookupQuotaException
+                                notFoundAnywhere = true
+                            }
                     }
             }
         }
@@ -930,7 +1016,9 @@ class MainActivity : FragmentActivity() {
 
             if (notFoundAnywhere) {
                 Text(
-                    text = if (serverUnreachable) {
+                    text = if (lookupQuotaExhausted) {
+                        "A cota de buscas por código de barras está esgotada. Tente novamente mais tarde ou cadastre o produto manualmente."
+                    } else if (serverUnreachable) {
                         "Servidor indisponível e produto não encontrado na internet. Não é possível cadastrar o produto agora."
                     } else {
                         "Produto não encontrado no estoque nem na internet."
@@ -1337,6 +1425,9 @@ class MainActivity : FragmentActivity() {
         var vehicleMakes by remember { mutableStateOf<List<VehicleMakeBrief>>(emptyList()) }
         var vehicleModels by remember { mutableStateOf<List<VehicleModelBrief>>(emptyList()) }
         var sendWppEnabled by remember { mutableStateOf(false) }
+        // WhatsApp send always needs the server live (it's the one that talks to the
+        // WhatsApp integration) — never queued offline like OS/photo creation.
+        var serverReachable by remember { mutableStateOf(true) }
         var loading by remember { mutableStateOf(true) }
         var error by remember { mutableStateOf<String?>(null) }
         var showWppDialog by remember { mutableStateOf(false) }
@@ -1361,6 +1452,8 @@ class MainActivity : FragmentActivity() {
         var newVehicleError by remember { mutableStateOf<String?>(null) }
         var saving by remember { mutableStateOf(false) }
         var saveError by remember { mutableStateOf<String?>(null) }
+        var saveErrorDetail by remember { mutableStateOf<String?>(null) }
+        var showSaveErrorDetail by remember { mutableStateOf(false) }
 
         // Adding/editing service and product lines never shows unit_value/total_value/
         // sales_price — technicians pick parts+quantity or type a service+hours+técnico only.
@@ -1438,17 +1531,39 @@ class MainActivity : FragmentActivity() {
         LaunchedEffect(order.id_order) {
             loading = true
             error = null
-            val detailResult = withContext(Dispatchers.IO) { fetchServiceOrderDetail(serverUrl, token, order.id_order) }
-            val servicesResult = withContext(Dispatchers.IO) { fetchServicesByOrder(serverUrl, token, order.id_order) }
-            val productsResult = withContext(Dispatchers.IO) { fetchServiceOrderProductsForOrder(serverUrl, token, order.id_order) }
-            val paymentsResult = withContext(Dispatchers.IO) { fetchPaymentsForOrder(serverUrl, token, order.id_order) }
-            val inventoryResult = withContext(Dispatchers.IO) { fetchInventoryList(serverUrl, token) }
-            val techResult = withContext(Dispatchers.IO) { fetchTechnicians(serverUrl, token) }
-            val modelsResult = withContext(Dispatchers.IO) { fetchCustomerModels(serverUrl, token) }
-            val makesResult = withContext(Dispatchers.IO) { fetchVehicleMakes(serverUrl, token) }
-            val vehicleModelsResult = withContext(Dispatchers.IO) { fetchVehicleModels(serverUrl, token) }
-            sendWppEnabled = withContext(Dispatchers.IO) { fetchSendWppEnabled(serverUrl, token) }
+            // 11 independent lookups were being awaited one after another — offline
+            // or on a slow connection, each one pays its own timeout before falling
+            // back to cache, so the wait multiplied by 11. Run them concurrently so
+            // the screen costs one timeout total instead of eleven.
+            var detailResult: Result<ServiceOrderFull> = Result.failure(Exception("not loaded"))
+            var servicesResult: Result<List<ServiceItem>> = Result.success(emptyList())
+            var productsResult: Result<List<ServiceOrderProductItem>> = Result.success(emptyList())
+            var paymentsResult: Result<List<PaymentItem>> = Result.success(emptyList())
+            var inventoryResult: Result<List<InventoryProduct>> = Result.success(emptyList())
+            var techResult: Result<List<TechnicianBrief>> = Result.success(emptyList())
+            var modelsResult: Result<List<CustomerModelBrief>> = Result.success(emptyList())
+            var makesResult: Result<List<VehicleMakeBrief>> = Result.success(emptyList())
+            var vehicleModelsResult: Result<List<VehicleModelBrief>> = Result.success(emptyList())
+            var wppEnabled = false
+            var reachable = true
+            withContext(Dispatchers.IO) {
+                coroutineScope {
+                    launch { detailResult = fetchServiceOrderDetail(serverUrl, token, order.id_order) }
+                    launch { servicesResult = fetchServicesByOrder(serverUrl, token, order.id_order) }
+                    launch { productsResult = fetchServiceOrderProductsForOrder(serverUrl, token, order.id_order) }
+                    launch { paymentsResult = fetchPaymentsForOrder(serverUrl, token, order.id_order) }
+                    launch { inventoryResult = fetchInventoryList(serverUrl, token) }
+                    launch { techResult = fetchTechnicians(serverUrl, token) }
+                    launch { modelsResult = fetchCustomerModels(serverUrl, token) }
+                    launch { makesResult = fetchVehicleMakes(serverUrl, token) }
+                    launch { vehicleModelsResult = fetchVehicleModels(serverUrl, token) }
+                    launch { wppEnabled = fetchSendWppEnabled(serverUrl, token) }
+                    launch { reachable = Connectivity.isServerReachable(serverUrl) }
+                }
+            }
             loading = false
+            sendWppEnabled = wppEnabled
+            serverReachable = reachable
             detailResult.onSuccess { detail = it }.onFailure { error = it.message }
             services = servicesResult.getOrDefault(emptyList())
             products = productsResult.getOrDefault(emptyList())
@@ -1480,6 +1595,7 @@ class MainActivity : FragmentActivity() {
             val d = detail ?: return
             saving = true
             saveError = null
+            saveErrorDetail = null
             val payload = d.copy(
                 status = statusEdit,
                 id_technician = idTechnicianEdit,
@@ -1496,7 +1612,10 @@ class MainActivity : FragmentActivity() {
                 saving = false
                 result
                     .onSuccess { onBack() }
-                    .onFailure { saveError = it.message ?: "Erro ao salvar OS" }
+                    .onFailure {
+                        saveError = it.message ?: "Erro ao salvar OS"
+                        saveErrorDetail = (it as? ApiException)?.detail
+                    }
             }
         }
 
@@ -1684,13 +1803,23 @@ class MainActivity : FragmentActivity() {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { onOpenImages(order) }) { Text("Fotos") }
                         if (sendWppEnabled) {
-                            Button(onClick = { showWppDialog = true }) { Text("WhatsApp") }
+                            Button(onClick = { showWppDialog = true }, enabled = serverReachable) {
+                                Text(if (serverReachable) "WhatsApp" else "WhatsApp (sem conexão)")
+                            }
                         }
                     }
 
                     if (saveError != null) {
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text(text = saveError!!, color = MaterialTheme.colorScheme.error)
+                        Text(
+                            text = saveError!! + if (saveErrorDetail != null) " (toque para detalhes)" else "",
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = if (saveErrorDetail != null) {
+                                Modifier.clickable { showSaveErrorDetail = true }
+                            } else {
+                                Modifier
+                            },
+                        )
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(onClick = { save() }, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
@@ -1711,6 +1840,17 @@ class MainActivity : FragmentActivity() {
                 orderId = order.id_order,
                 customerName = detail?.customer_name,
                 onDismiss = { showWppDialog = false },
+            )
+        }
+
+        if (showSaveErrorDetail && saveErrorDetail != null) {
+            AlertDialog(
+                onDismissRequest = { showSaveErrorDetail = false },
+                title = { Text("Detalhe do erro") },
+                text = { Text(saveErrorDetail!!) },
+                confirmButton = {
+                    TextButton(onClick = { showSaveErrorDetail = false }) { Text("Fechar") }
+                },
             )
         }
 
@@ -1968,6 +2108,8 @@ class MainActivity : FragmentActivity() {
         var sending by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
         var noPhone by remember { mutableStateOf(false) }
+        var invalidNumber by remember { mutableStateOf(false) }
+        var invalidNumberMessage by remember { mutableStateOf("") }
         var manualPhone by remember { mutableStateOf("") }
         var sent by remember { mutableStateOf(false) }
 
@@ -1980,6 +2122,7 @@ class MainActivity : FragmentActivity() {
                 when (result) {
                     is WppSendResult.Success -> sent = true
                     is WppSendResult.NoPhone -> noPhone = true
+                    is WppSendResult.InvalidNumber -> { invalidNumber = true; invalidNumberMessage = result.message }
                     is WppSendResult.Error -> error = result.message
                 }
             }
@@ -1991,9 +2134,13 @@ class MainActivity : FragmentActivity() {
             text = {
                 when {
                     sent -> Text("PDF enviado com sucesso!", color = MaterialTheme.colorScheme.primary)
-                    noPhone -> Column {
+                    noPhone || invalidNumber -> Column {
                         Text(
-                            text = "O cliente não possui número de WhatsApp cadastrado. Informe o número abaixo:",
+                            text = if (invalidNumber) {
+                                invalidNumberMessage
+                            } else {
+                                "O cliente não possui número de WhatsApp cadastrado. Informe o número abaixo:"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -2027,7 +2174,7 @@ class MainActivity : FragmentActivity() {
             confirmButton = {
                 when {
                     sent -> TextButton(onClick = onDismiss) { Text("Fechar") }
-                    noPhone -> TextButton(onClick = { send(manualPhone) }, enabled = !sending && manualPhone.isNotBlank()) {
+                    noPhone || invalidNumber -> TextButton(onClick = { send(manualPhone) }, enabled = !sending && manualPhone.isNotBlank()) {
                         Text(if (sending) "Enviando..." else "Enviar")
                     }
                     else -> TextButton(onClick = { send("") }, enabled = !sending) {
@@ -2080,11 +2227,23 @@ class MainActivity : FragmentActivity() {
         var showErrorDetail by remember { mutableStateOf(false) }
 
         LaunchedEffect(Unit) {
-            val customersResult = withContext(Dispatchers.IO) { fetchCustomers(serverUrl, token) }
-            val modelsResult = withContext(Dispatchers.IO) { fetchCustomerModels(serverUrl, token) }
-            val techResult = withContext(Dispatchers.IO) { fetchTechnicians(serverUrl, token) }
-            val makesResult = withContext(Dispatchers.IO) { fetchVehicleMakes(serverUrl, token) }
-            val vehicleModelsResult = withContext(Dispatchers.IO) { fetchVehicleModels(serverUrl, token) }
+            // These five lookups are independent — run them concurrently instead of
+            // one after another, so a slow server costs one timeout total instead
+            // of one per list, which is what made this screen's spinner drag on so long.
+            var customersResult: Result<List<CustomerBrief>> = Result.success(emptyList())
+            var modelsResult: Result<List<CustomerModelBrief>> = Result.success(emptyList())
+            var techResult: Result<List<TechnicianBrief>> = Result.success(emptyList())
+            var makesResult: Result<List<VehicleMakeBrief>> = Result.success(emptyList())
+            var vehicleModelsResult: Result<List<VehicleModelBrief>> = Result.success(emptyList())
+            withContext(Dispatchers.IO) {
+                coroutineScope {
+                    launch { customersResult = fetchCustomers(serverUrl, token) }
+                    launch { modelsResult = fetchCustomerModels(serverUrl, token) }
+                    launch { techResult = fetchTechnicians(serverUrl, token) }
+                    launch { makesResult = fetchVehicleMakes(serverUrl, token) }
+                    launch { vehicleModelsResult = fetchVehicleModels(serverUrl, token) }
+                }
+            }
             loadingLists = false
             customersResult.onSuccess { customers = it }.onFailure { loadError = it.message }
             modelsResult.onFailure { loadError = loadError ?: it.message }
@@ -2320,8 +2479,9 @@ class MainActivity : FragmentActivity() {
         }
 
         if (showNewVehicleDialog && selectedCustomer != null) {
+            val ownerCustomer = selectedCustomer!!
             NewVehicleDialog(
-                idCustomer = selectedCustomer!!.id_customer,
+                idCustomer = ownerCustomer.id_customer,
                 makes = vehicleMakes,
                 models = vehicleModels,
                 saving = newVehicleSaving,
@@ -2348,6 +2508,498 @@ class MainActivity : FragmentActivity() {
                                 showNewVehicleDialog = false
                             }
                             .onFailure { newVehicleError = it.message ?: "Erro ao cadastrar veículo" }
+                    }
+                },
+            )
+        }
+    }
+
+    // ── Simplified "Abrir OS pela Placa": for users who find the full form
+    // (typing customer/vehicle) hard to use. Scans the plate first — if it
+    // matches a known vehicle, customer+vehicle are resolved with no typing at
+    // all; otherwise falls back to the same external plate lookup used when
+    // registering a new vehicle, then only asks who the car belongs to.
+    @Composable
+    private fun SimpleServiceOrderScreen(
+        serverUrl: String,
+        token: String,
+        onBack: () -> Unit,
+        onUseFullForm: () -> Unit,
+        onCreated: (ServiceOrderSummary) -> Unit,
+    ) {
+        val context = LocalContext.current
+
+        var customers by remember { mutableStateOf<List<CustomerBrief>>(emptyList()) }
+        var models by remember { mutableStateOf<List<CustomerModelBrief>>(emptyList()) }
+        var vehicleMakes by remember { mutableStateOf<List<VehicleMakeBrief>>(emptyList()) }
+        var vehicleModels by remember { mutableStateOf<List<VehicleModelBrief>>(emptyList()) }
+
+        LaunchedEffect(Unit) {
+            // Run all four lookups concurrently instead of one after another,
+            // so a slow server costs one timeout total instead of one per list.
+            var customersResult: Result<List<CustomerBrief>> = Result.success(emptyList())
+            var modelsResult: Result<List<CustomerModelBrief>> = Result.success(emptyList())
+            var makesResult: Result<List<VehicleMakeBrief>> = Result.success(emptyList())
+            var vehicleModelsResult: Result<List<VehicleModelBrief>> = Result.success(emptyList())
+            withContext(Dispatchers.IO) {
+                coroutineScope {
+                    launch { customersResult = fetchCustomers(serverUrl, token) }
+                    launch { modelsResult = fetchCustomerModels(serverUrl, token) }
+                    launch { makesResult = fetchVehicleMakes(serverUrl, token) }
+                    launch { vehicleModelsResult = fetchVehicleModels(serverUrl, token) }
+                }
+            }
+            customers = customersResult.getOrDefault(emptyList())
+            models = modelsResult.getOrDefault(emptyList())
+            vehicleMakes = makesResult.getOrDefault(emptyList())
+            vehicleModels = vehicleModelsResult.getOrDefault(emptyList())
+        }
+
+        var showCamera by remember { mutableStateOf(false) }
+        var scanning by remember { mutableStateOf(false) }
+        var scanError by remember { mutableStateOf<String?>(null) }
+
+        var resolvedCustomer by remember { mutableStateOf<CustomerBrief?>(null) }
+        var resolvedModel by remember { mutableStateOf<CustomerModelBrief?>(null) }
+        var pendingPlate by remember { mutableStateOf<String?>(null) }
+        var pendingPrefill by remember { mutableStateOf<VehicleLookupResponse?>(null) }
+        var pendingMatchedModel by remember { mutableStateOf<VehicleModelBrief?>(null) }
+        var needsCustomer by remember { mutableStateOf(false) }
+        var resolvingVehicle by remember { mutableStateOf(false) }
+        var plateEdit by remember { mutableStateOf("") }
+        var manualPlate by remember { mutableStateOf("") }
+        var showCustomerPicker by remember { mutableStateOf(false) }
+        var showNewCustomerDialog by remember { mutableStateOf(false) }
+        var newCustomerSaving by remember { mutableStateOf(false) }
+        var newCustomerError by remember { mutableStateOf<String?>(null) }
+
+        var notes by remember { mutableStateOf("") }
+        var saving by remember { mutableStateOf(false) }
+        var error by remember { mutableStateOf<String?>(null) }
+
+        fun resetScan() {
+            resolvedCustomer = null
+            resolvedModel = null
+            pendingPlate = null
+            pendingPrefill = null
+            pendingMatchedModel = null
+            needsCustomer = false
+            scanError = null
+            error = null
+            manualPlate = ""
+        }
+
+        suspend fun resolvePlate(plate: String) {
+            // The recognizer routinely confuses I/1, O/0, S/5, etc., and the plate
+            // format itself can't tell us which reading is right — so check every
+            // plausible reading against what we actually know, instead of trusting
+            // whichever one OCR happened to output.
+            val candidates = plateCandidates(plate)
+
+            for (candidate in candidates) {
+                val normalized = normalizePlate(candidate)
+                val localMatch = models.firstOrNull { normalizePlate(it.plate ?: "") == normalized }
+                val owner = localMatch?.let { m -> customers.firstOrNull { it.id_customer == m.id_customer } }
+                if (localMatch != null && owner != null) {
+                    resolvedCustomer = owner
+                    resolvedModel = localMatch
+                    scanning = false
+                    return
+                }
+            }
+
+            // Not known locally under any reading — try the same external plate
+            // lookup used when registering a brand-new vehicle for each reading,
+            // keeping the first one that resolves to a real vehicle, and match it
+            // against the catalog right away so the vehicle's data is already on
+            // screen before the user even picks who it belongs to.
+            for (candidate in candidates) {
+                val lookupResult = withContext(Dispatchers.IO) { lookupVehicleByPlate(serverUrl, token, candidate) }
+                val prefill = lookupResult.getOrNull() ?: continue
+                val matchedModelCatalog = if (prefill.source == "local" && prefill.id_model != null) {
+                    vehicleModels.firstOrNull { it.id_model == prefill.id_model }
+                } else {
+                    val matchedMake = findMatchingMake(vehicleMakes, prefill.brand)
+                    findMatchingModel(vehicleModels, matchedMake?.id_make, prefill.model, prefill.sub_model)
+                }
+                if (matchedModelCatalog != null) {
+                    scanning = false
+                    pendingPlate = candidate
+                    pendingPrefill = prefill
+                    pendingMatchedModel = matchedModelCatalog
+                    needsCustomer = true
+                    return
+                }
+            }
+
+            scanning = false
+            scanError = "Não foi possível identificar o modelo do veículo automaticamente pela placa $plate. Use \"Abrir OS\" completo para cadastrar esse veículo."
+        }
+
+        // Lets the user fix a plate the OCR/candidate-matching above got wrong
+        // (e.g. reading "1" for "I") before a new vehicle is registered under
+        // it — unlike the full form, this flow never shows an editable plate
+        // field otherwise, so a wrong reading here would go uncaught.
+        suspend fun resolveExactPlate(rawPlate: String) {
+            val normalized = normalizePlate(rawPlate)
+            if (!PLATE_REGEX.matches(normalized)) {
+                error = "Placa inválida."
+                return
+            }
+            resolvingVehicle = true
+            error = null
+            val lookupResult = withContext(Dispatchers.IO) { lookupVehicleByPlate(serverUrl, token, normalized) }
+            val prefill = lookupResult.getOrNull()
+            if (prefill == null) {
+                resolvingVehicle = false
+                error = "Veículo não encontrado para a placa $normalized."
+                return
+            }
+            val matchedModelCatalog = if (prefill.source == "local" && prefill.id_model != null) {
+                vehicleModels.firstOrNull { it.id_model == prefill.id_model }
+            } else {
+                val matchedMake = findMatchingMake(vehicleMakes, prefill.brand)
+                findMatchingModel(vehicleModels, matchedMake?.id_make, prefill.model, prefill.sub_model)
+            }
+            resolvingVehicle = false
+            if (matchedModelCatalog == null) {
+                error = "Não foi possível identificar o modelo do veículo para a placa $normalized."
+                return
+            }
+            pendingPlate = normalized
+            pendingPrefill = prefill
+            pendingMatchedModel = matchedModelCatalog
+        }
+
+        LaunchedEffect(pendingPlate) { plateEdit = pendingPlate ?: "" }
+
+        fun recognizePlateFromImage(uri: Uri) {
+            try {
+                val image = InputImage.fromFilePath(context, uri)
+                val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                recognizer.process(image)
+                    .addOnSuccessListener { visionText ->
+                        val plate = extractPlateFromText(visionText.text)
+                        if (plate != null) {
+                            lifecycleScope.launch { resolvePlate(plate) }
+                        } else {
+                            scanning = false
+                            scanError = "Não foi possível ler a placa na foto. Tente novamente."
+                        }
+                    }
+                    .addOnFailureListener {
+                        scanning = false
+                        scanError = "Erro ao processar a imagem: ${it.message}"
+                    }
+                    .addOnCompleteListener { recognizer.close() }
+            } catch (e: Exception) {
+                scanning = false
+                scanError = "Erro ao processar a imagem: ${e.message}"
+            }
+        }
+
+        fun submitManualPlate() {
+            val normalized = normalizePlate(manualPlate)
+            if (!PLATE_REGEX.matches(normalized)) {
+                scanError = "Placa inválida."
+                return
+            }
+            scanning = true
+            scanError = null
+            lifecycleScope.launch { resolvePlate(normalized) }
+        }
+
+        fun onCustomerChosen(customer: CustomerBrief) {
+            val plate = pendingPlate ?: return
+            val prefill = pendingPrefill
+            val matchedModelCatalog = pendingMatchedModel ?: return
+            resolvingVehicle = true
+            lifecycleScope.launch {
+                val request = NewCustomerModelRequest(
+                    id_customer = customer.id_customer,
+                    id_model = matchedModelCatalog.id_model,
+                    plate = plate,
+                    year_make = prefill?.year_make?.toIntOrNull(),
+                    year_model = prefill?.year_model?.toIntOrNull(),
+                    color = prefill?.color,
+                    vin = prefill?.chassis,
+                )
+                val vehicleResult = withContext(Dispatchers.IO) { createCustomerModel(serverUrl, token, request) }
+                resolvingVehicle = false
+                vehicleResult
+                    .onSuccess { created ->
+                        resolvedCustomer = customer
+                        resolvedModel = CustomerModelBrief(
+                            id_customer_model = created.id_customer_model,
+                            id_customer = customer.id_customer,
+                            model_name = vehicleModelLabel(matchedModelCatalog),
+                            plate = plate,
+                        )
+                        needsCustomer = false
+                        pendingPlate = null
+                        pendingPrefill = null
+                        pendingMatchedModel = null
+                    }
+                    .onFailure { error = it.message ?: "Erro ao cadastrar veículo" }
+            }
+        }
+
+        if (showCamera) {
+            CameraCaptureScreen(
+                outputFile = {
+                    val dir = File(context.cacheDir, "plates").apply { mkdirs() }
+                    File(dir, "PLATE_${System.currentTimeMillis()}.jpg")
+                },
+                onCaptured = { uri ->
+                    showCamera = false
+                    scanning = true
+                    scanError = null
+                    recognizePlateFromImage(uri)
+                },
+                onCancel = { showCamera = false },
+            )
+            return
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Nova OS pela placa", style = MaterialTheme.typography.headlineSmall)
+                TextButton(onClick = onBack) { Text("← Voltar") }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            when {
+                resolvedCustomer != null && resolvedModel != null -> {
+                    val customer = resolvedCustomer!!
+                    val model = resolvedModel!!
+                    Text(text = "Cliente", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(text = customerLabel(customer), style = MaterialTheme.typography.headlineSmall)
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(text = "Veículo", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(text = modelLabel(model), style = MaterialTheme.typography.headlineSmall)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(onClick = { resetScan() }) { Text("Não é esse veículo? Escanear de novo") }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(text = "Observações do cliente", style = MaterialTheme.typography.labelLarge)
+                    OutlinedTextField(
+                        value = notes,
+                        onValueChange = { notes = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 4,
+                        textStyle = MaterialTheme.typography.titleMedium,
+                    )
+
+                    if (error != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(text = error!!, color = MaterialTheme.colorScheme.error)
+                    }
+
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Button(
+                        onClick = {
+                            saving = true
+                            error = null
+                            lifecycleScope.launch {
+                                val request = NewServiceOrderRequest(
+                                    id_customer = customer.id_customer,
+                                    id_customer_model = model.id_customer_model,
+                                    id_technician = null,
+                                    date_time_in = nowSqlDateTime(),
+                                    customer_notes = notes.ifBlank { null },
+                                )
+                                val result = withContext(Dispatchers.IO) { createServiceOrder(serverUrl, token, request) }
+                                saving = false
+                                result
+                                    .onSuccess { created ->
+                                        onCreated(
+                                            ServiceOrderSummary(
+                                                id_order = created.id_order,
+                                                customer_name = customerLabel(customer),
+                                                model_name = model.model_name,
+                                                plate_number = model.plate,
+                                                status = 0,
+                                            ),
+                                        )
+                                    }
+                                    .onFailure { error = it.message ?: "Erro ao abrir OS" }
+                            }
+                        },
+                        enabled = !saving,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp),
+                    ) {
+                        if (saving) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("GRAVAR OS", style = MaterialTheme.typography.titleLarge)
+                        }
+                    }
+                }
+
+                needsCustomer -> {
+                    Text(text = "Veículo", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = pendingMatchedModel?.let { vehicleModelLabel(it) } ?: "-",
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                    val vehicleDetails = listOfNotNull(
+                        pendingPrefill?.color,
+                        pendingPrefill?.year_model ?: pendingPrefill?.year_make,
+                    ).joinToString(" · ")
+                    if (vehicleDetails.isNotBlank()) {
+                        Text(
+                            text = vehicleDetails,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // Editable — the plate above came from OCR + a best-effort guess
+                    // against confusable characters (1/I, 0/O, etc.), so it needs a
+                    // human check before a new vehicle gets registered under it.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = plateEdit,
+                            onValueChange = { plateEdit = it.uppercase() },
+                            label = { Text("Placa") },
+                            singleLine = true,
+                            enabled = !resolvingVehicle,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(
+                            onClick = { lifecycleScope.launch { resolveExactPlate(plateEdit) } },
+                            enabled = !resolvingVehicle && normalizePlate(plateEdit) != normalizePlate(pendingPlate ?: ""),
+                        ) { Text("Corrigir") }
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(
+                        text = "Veículo novo pra nós. De quem é?",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    if (resolvingVehicle) {
+                        CircularProgressIndicator()
+                    } else {
+                        Button(
+                            onClick = { showCustomerPicker = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp),
+                        ) { Text("Selecionar cliente", style = MaterialTheme.typography.titleMedium) }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedButton(
+                            onClick = { newCustomerError = null; showNewCustomerDialog = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp),
+                        ) { Text("+ Cliente novo", style = MaterialTheme.typography.titleMedium) }
+                    }
+                    if (error != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(text = error!!, color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    TextButton(onClick = { resetScan() }) { Text("← Escanear outra placa") }
+                }
+
+                else -> {
+                    Button(
+                        onClick = { showCamera = true },
+                        enabled = !scanning,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(96.dp),
+                    ) {
+                        if (scanning) {
+                            CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Lendo a placa...", style = MaterialTheme.typography.titleLarge)
+                        } else {
+                            Text("📷 Escanear Placa", style = MaterialTheme.typography.titleLarge)
+                        }
+                    }
+                    if (scanError != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(text = scanError!!, color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        text = "ou digite a placa",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = manualPlate,
+                            onValueChange = { manualPlate = it.uppercase() },
+                            label = { Text("Placa") },
+                            singleLine = true,
+                            enabled = !scanning,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(
+                            onClick = { submitManualPlate() },
+                            enabled = !scanning && manualPlate.isNotBlank(),
+                        ) { Text("Buscar") }
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    TextButton(onClick = onUseFullForm) { Text("Ou abrir OS pelo nome do cliente") }
+                }
+            }
+        }
+
+        if (showCustomerPicker) {
+            PickerDialog(
+                title = "Selecionar cliente",
+                options = customers,
+                labelOf = { customerLabel(it) },
+                onSelect = {
+                    showCustomerPicker = false
+                    onCustomerChosen(it)
+                },
+                onDismiss = { showCustomerPicker = false },
+            )
+        }
+
+        if (showNewCustomerDialog) {
+            NewCustomerDialog(
+                saving = newCustomerSaving,
+                error = newCustomerError,
+                onDismiss = { showNewCustomerDialog = false },
+                onConfirm = { request ->
+                    newCustomerSaving = true
+                    newCustomerError = null
+                    lifecycleScope.launch {
+                        val result = withContext(Dispatchers.IO) { createCustomer(serverUrl, token, request) }
+                        newCustomerSaving = false
+                        result
+                            .onSuccess { created ->
+                                val newCustomer = CustomerBrief(
+                                    id_customer = created.id_customer,
+                                    individual_name = request.individual_name,
+                                    trade_name = request.trade_name,
+                                    legal_name = request.legal_name,
+                                )
+                                customers = customers + newCustomer
+                                showNewCustomerDialog = false
+                                onCustomerChosen(newCustomer)
+                            }
+                            .onFailure { newCustomerError = it.message ?: "Erro ao cadastrar cliente" }
                     }
                 },
             )
@@ -2493,9 +3145,18 @@ class MainActivity : FragmentActivity() {
             if (!result.year_model.isNullOrBlank()) yearModel = result.year_model
             if (!result.color.isNullOrBlank()) color = result.color
             if (!result.chassis.isNullOrBlank()) chassis = result.chassis
-            val matchedMake = findMatchingMake(makes, result.brand)
-            selectedMake = matchedMake
-            selectedModel = findMatchingModel(models, matchedMake?.id_make, result.model, result.sub_model)
+            // A "local" result already carries the exact catalog id (the
+            // vehicle is already registered under some customer) — no need to
+            // guess it from free-text brand/model like the external lookup requires.
+            if (result.source == "local" && result.id_model != null) {
+                val exactModel = models.firstOrNull { it.id_model == result.id_model }
+                selectedModel = exactModel
+                selectedMake = makes.firstOrNull { it.id_make == exactModel?.id_make }
+            } else {
+                val matchedMake = findMatchingMake(makes, result.brand)
+                selectedMake = matchedMake
+                selectedModel = findMatchingModel(models, matchedMake?.id_make, result.model, result.sub_model)
+            }
         }
 
         fun runPlateLookup(plateValue: String) {
@@ -2597,13 +3258,25 @@ class MainActivity : FragmentActivity() {
                         )
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = plate,
-                        onValueChange = { plate = it },
-                        label = { Text("Placa") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = plate,
+                            onValueChange = { plate = it.uppercase() },
+                            label = { Text("Placa") },
+                            singleLine = true,
+                            enabled = !scanning,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(
+                            onClick = {
+                                scanning = true
+                                scanError = null
+                                runPlateLookup(plate)
+                            },
+                            enabled = !scanning && plate.isNotBlank(),
+                        ) { Text("Buscar") }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = yearMake,
@@ -2746,6 +3419,11 @@ class MainActivity : FragmentActivity() {
         )
     }
 
+    // Fetches a reference list (customers, vehicles, technicians, makes/models)
+    // and caches it locally on success; on any failure, falls back to whatever
+    // was last cached instead of surfacing an error, so pickers still have
+    // something to offer on a cold app start with no connectivity. Only fails
+    // when there's truly nothing cached yet — e.g. before ever logging in online.
     private suspend fun fetchCustomers(serverUrl: String, token: String): Result<List<CustomerBrief>> {
         return try {
             val response = api.getCustomers("$serverUrl/customers", "Bearer $token")
@@ -2819,20 +3497,6 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private suspend fun lookupVehicleByPlate(serverUrl: String, token: String, plate: String): Result<VehicleLookupResponse> {
-        return try {
-            val response = api.getVehicleLookup("$serverUrl/vehicle-lookup/$plate", "Bearer $token")
-            val body = response.body()
-            if (response.isSuccessful && body != null) {
-                Result.success(body)
-            } else {
-                Result.failure(Exception("Veículo não encontrado para esta placa (HTTP ${response.code()})"))
-            }
-        } catch (e: Exception) {
-            Result.failure(Exception("Não foi possível consultar a placa: ${e.message}"))
-        }
-    }
-
     private suspend fun createCustomer(serverUrl: String, token: String, request: NewCustomerRequest): Result<CustomerCreateResponse> {
         return try {
             val response = api.createCustomer("$serverUrl/customers", "Bearer $token", request)
@@ -2844,6 +3508,20 @@ class MainActivity : FragmentActivity() {
             }
         } catch (e: Exception) {
             Result.failure(Exception("Não foi possível cadastrar cliente: ${e.message}"))
+        }
+    }
+
+    private suspend fun lookupVehicleByPlate(serverUrl: String, token: String, plate: String): Result<VehicleLookupResponse> {
+        return try {
+            val response = api.getVehicleLookup("$serverUrl/vehicle-lookup/$plate", "Bearer $token")
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                Result.failure(Exception("Veículo não encontrado para esta placa (HTTP ${response.code()})"))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Não foi possível consultar a placa: ${e.message}"))
         }
     }
 
@@ -2991,7 +3669,8 @@ class MainActivity : FragmentActivity() {
 
             when {
                 loading -> CircularProgressIndicator()
-                images.isEmpty() -> Text(text = "Nenhuma imagem enviada ainda.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                images.isEmpty() ->
+                    Text(text = "Nenhuma imagem enviada ainda.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 else -> LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3157,7 +3836,9 @@ class MainActivity : FragmentActivity() {
         return try {
             val response = api.getExternalLookup("$serverUrl/inventory/external-lookup/$code", "Bearer $token")
             val body = response.body()
-            if (response.isSuccessful && body != null) Result.success(body) else Result.failure(Exception("not found"))
+            if (response.isSuccessful && body != null) Result.success(body)
+            else if (response.code() == 429) Result.failure(LookupQuotaException())
+            else Result.failure(Exception("not found"))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -3167,8 +3848,13 @@ class MainActivity : FragmentActivity() {
     // busca (Cosmos → UPCItemDB) que normalmente roda no servidor, mas chamando
     // as APIs externas direto do aparelho, sem depender do backend como proxy.
     private suspend fun lookupExternalDirect(code: String): Result<ExternalProduct> {
-        lookupCosmosDirect(code).getOrNull()?.let { return Result.success(it) }
-        return lookupUpcItemDbDirect(code)
+        val cosmos = lookupCosmosDirect(code)
+        cosmos.getOrNull()?.let { return Result.success(it) }
+        val upc = lookupUpcItemDbDirect(code)
+        if (upc.isSuccess) return upc
+        // Nothing found: if a source refused for lack of quota, report that instead of "not found".
+        val quotaHit = cosmos.exceptionOrNull() is LookupQuotaException || upc.exceptionOrNull() is LookupQuotaException
+        return if (quotaHit) Result.failure(LookupQuotaException()) else upc
     }
 
     private suspend fun lookupCosmosDirect(code: String): Result<ExternalProduct> {
@@ -3177,6 +3863,8 @@ class MainActivity : FragmentActivity() {
             val body = response.body()
             if (response.isSuccessful && !body?.description.isNullOrBlank()) {
                 Result.success(ExternalProduct(name = body!!.description, brand = body.brand?.name))
+            } else if (response.code() == 429) {
+                Result.failure(LookupQuotaException())
             } else {
                 Result.failure(Exception("not found"))
             }
@@ -3191,6 +3879,8 @@ class MainActivity : FragmentActivity() {
             val item = response.body()?.items?.firstOrNull()
             if (response.isSuccessful && item != null) {
                 Result.success(ExternalProduct(name = item.title, brand = item.brand))
+            } else if (response.code() == 429) {
+                Result.failure(LookupQuotaException())
             } else {
                 Result.failure(Exception("not found"))
             }
@@ -3433,13 +4123,17 @@ class MainActivity : FragmentActivity() {
                 val raw = response.errorBody()?.string()
                 val json = raw?.let { runCatching { JSONObject(it) }.getOrNull() }
                 val code = json?.optString("error")
+                val message = json?.optString("message")?.takeIf { it.isNotBlank() }
                 if (code == "no_phone") {
                     WppSendResult.NoPhone
+                } else if (code == "invalid_whatsapp_number") {
+                    WppSendResult.InvalidNumber(message ?: "O número informado não é um WhatsApp válido.")
                 } else {
-                    val message = json?.optString("message")?.takeIf { it.isNotBlank() }
-                        ?: code?.takeIf { !it.isNullOrBlank() }
-                        ?: "Erro ao enviar (HTTP ${response.code()})"
-                    WppSendResult.Error(message)
+                    WppSendResult.Error(
+                        message
+                            ?: code?.takeIf { !it.isNullOrBlank() }
+                            ?: "Erro ao enviar (HTTP ${response.code()})",
+                    )
                 }
             }
         } catch (e: Exception) {
@@ -3451,6 +4145,7 @@ class MainActivity : FragmentActivity() {
 private sealed class WppSendResult {
     data class Success(val phone: String) : WppSendResult()
     data object NoPhone : WppSendResult()
+    data class InvalidNumber(val message: String) : WppSendResult()
     data class Error(val message: String) : WppSendResult()
 }
 
@@ -3566,7 +4261,7 @@ private fun CameraCaptureScreen(
                             },
                         )
                     },
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(32.dp),
+                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(32.dp),
                 ) { Text("📷 Capturar") }
 
                 TextButton(
@@ -3596,6 +4291,43 @@ private fun extractPlateFromText(text: String): String? {
     }
     return null
 }
+
+// Character pairs the on-device recognizer routinely mixes up on plates —
+// both shapes are near-identical in the Mercosul plate font, and the plate
+// format itself doesn't disambiguate them (letters and digits are both valid
+// in slots that vary between old-format and Mercosul plates).
+private val PLATE_CONFUSABLES: Map<Char, Char> = mapOf(
+    '0' to 'O', 'O' to '0',
+    '1' to 'I', 'I' to '1',
+    '5' to 'S', 'S' to '5',
+    '8' to 'B', 'B' to '8',
+    '2' to 'Z', 'Z' to '2',
+    '6' to 'G', 'G' to '6',
+)
+
+// Every plausible reading of a 7-char OCR'd plate, swapping combinations of
+// its easily-confused characters, keeping only the ones that still look like
+// a valid plate. Ordered by how many swaps they need — the raw OCR reading
+// (zero swaps) always comes first — so callers can try the likeliest reading
+// first and fall back to the others only if it doesn't match a real vehicle.
+private fun plateCandidates(plate: String): List<String> {
+    val chars = plate.toCharArray()
+    val swappable = chars.indices.filter { PLATE_CONFUSABLES.containsKey(chars[it]) }
+    val seen = LinkedHashSet<String>()
+    for (mask in 0 until (1 shl swappable.size)) {
+        val candidate = chars.copyOf()
+        for ((bit, index) in swappable.withIndex()) {
+            if ((mask shr bit) and 1 == 1) candidate[index] = PLATE_CONFUSABLES.getValue(candidate[index])
+        }
+        val candidateStr = String(candidate)
+        if (PLATE_REGEX.matches(candidateStr)) seen.add(candidateStr)
+    }
+    return seen.sortedBy { candidate -> candidate.indices.count { candidate[it] != plate[it] } }
+}
+
+// Strips punctuation/spacing so a stored plate ("ABC-1234") matches a freshly
+// OCR'd one ("ABC1234") regardless of formatting.
+private fun normalizePlate(plate: String): String = plate.uppercase().replace(Regex("[^A-Z0-9]"), "")
 
 private fun normalizeForMatch(s: String): String =
     java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
@@ -3719,6 +4451,9 @@ data class InventoryProduct(
 )
 
 data class ExternalProduct(val name: String?, val brand: String?)
+
+/** A barcode database refused the lookup for lack of quota (HTTP 429) — different from "not found". */
+class LookupQuotaException : Exception("A cota de buscas por código de barras está esgotada.")
 
 data class CosmosLookupResponse(val description: String?, val brand: CosmosBrand?)
 data class CosmosBrand(val name: String?)
@@ -3912,6 +4647,10 @@ data class VehicleLookupResponse(
     val year_model: String?,
     val color: String?,
     val chassis: String?,
+    // "local" (already registered in our own DB — id_model is exact) or
+    // "external" (from the paid lookup service — brand/model are free text).
+    val source: String? = null,
+    val id_model: Int? = null,
 )
 
 data class CustomerModelCreateResponse(val id_customer_model: Int)

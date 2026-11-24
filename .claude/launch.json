@@ -10,6 +10,14 @@
       "autoPort": true
     },
     {
+      "name": "badencar-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "badencar-web",
+      "port": 5173,
+      "autoPort": true
+    },
+    {
       "name": "savicar-api",
       "runtimeExecutable": "go",
       "runtimeArgs": ["run", "main.go"],

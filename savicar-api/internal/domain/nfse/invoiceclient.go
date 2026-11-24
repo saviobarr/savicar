@@ -7,9 +7,12 @@ import "context"
 // given reference and returns immediately with a "processing" status;
 // GetServiceInvoiceStatus is polled with that same reference until the hub
 // returns a terminal status (authorized or rejected).
+// cliente, when known, is the tomador's razão social — carried through
+// purely so a failure log can say which customer's DPS it was, without the
+// domain layer needing to know anything about logging itself.
 type InvoiceClient interface {
-	CreateServiceInvoice(ctx context.Context, apiKey, ref string, payload []byte) (statusCode int, body []byte, err error)
-	GetServiceInvoiceStatus(ctx context.Context, apiKey, ref string) (statusCode int, body []byte, err error)
+	CreateServiceInvoice(ctx context.Context, apiKey, ref, cliente string, payload []byte) (statusCode int, body []byte, curl string, err error)
+	GetServiceInvoiceStatus(ctx context.Context, apiKey, ref, cliente string) (statusCode int, body []byte, curl string, err error)
 }
 
 // PrestadorContato carries the tenant contact fields the DPS payload itself

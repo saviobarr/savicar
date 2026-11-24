@@ -15,6 +15,10 @@ func (s *Service) GetAll(ctx context.Context) ([]nf.NF, error) {
 	return s.repo.FindAll(ctx)
 }
 
+func (s *Service) GetByTipo(ctx context.Context, tipo int) ([]nf.NF, error) {
+	return s.repo.FindByTipo(ctx, tipo)
+}
+
 func (s *Service) GetByID(ctx context.Context, id int) (*nf.NF, error) {
 	n, err := s.repo.FindByID(ctx, id)
 	if err != nil {

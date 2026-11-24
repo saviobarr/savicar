@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"strings"
+	"time"
 
 	"savicar-api/internal/domain/serviceorderimage"
 )
@@ -120,6 +121,23 @@ func trimStringPtr(p *string) *string {
 	}
 	s := strings.TrimSpace(*p)
 	return &s
+}
+
+// normalizeDBDateTime undoes a quirk of the MySQL driver: with parseTime=true
+// (see db/db.go), scanning a DATETIME/DATE column into a *string comes back
+// formatted as RFC3339 ("2026-01-15T09:00:00Z") instead of MySQL's own
+// "2006-01-02 15:04:05" literal — and MySQL then rejects that RFC3339 form if
+// the same value is ever written back verbatim (e.g. an edit that didn't
+// touch the field). Leaves any value that isn't RFC3339 untouched.
+func normalizeDBDateTime(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	if t, err := time.Parse(time.RFC3339, *p); err == nil {
+		formatted := t.Format("2006-01-02 15:04:05")
+		return &formatted
+	}
+	return p
 }
 
 func derefInt(p *int) any {

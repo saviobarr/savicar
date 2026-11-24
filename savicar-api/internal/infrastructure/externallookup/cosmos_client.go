@@ -48,6 +48,10 @@ func (c *CosmosClient) Lookup(ctx context.Context, barcode string) (*inventory.E
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, nil
 	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		// Cosmos answers 429 both for the daily limit and for a plan with no quota at all.
+		return nil, inventory.ErrLookupQuotaExceeded
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("cosmos: unexpected status %d", resp.StatusCode)
 	}

@@ -1,5 +1,7 @@
 import { useState, useRef } from 'react'
-import { fetchDailyFinancialReport } from '../api'
+import { fetchDailyFinancialReport, fetchAllOperationalCosts } from '../api'
+import { somaCustosOperacionaisNoPeriodo } from '../utils/operationalCosts'
+import { serverNow } from '../serverClock'
 
 function fmt(val) {
   return Number(val ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -26,7 +28,7 @@ function isoToBR(iso) {
 }
 
 function todayISO() {
-  const d = new Date()
+  const d = serverNow()
   const pad = n => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
@@ -58,6 +60,7 @@ export default function RelatorioOperacaoPage() {
   const [fromDisplay, setFromDisplay] = useState(isoToBR(today))
   const [toDisplay,   setToDisplay]   = useState(isoToBR(today))
   const [report, setReport]     = useState(null)
+  const [operationalCostsTotal, setOperationalCostsTotal] = useState(0)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState(null)
   const [expanded, setExpanded] = useState({})
@@ -81,8 +84,14 @@ export default function RelatorioOperacaoPage() {
     setLoading(true)
     setError(null)
     setReport(null)
+    setOperationalCostsTotal(0)
     try {
-      setReport(await fetchDailyFinancialReport(from, to))
+      const [reportData, operationalCosts] = await Promise.all([
+        fetchDailyFinancialReport(from, to),
+        fetchAllOperationalCosts(),
+      ])
+      setReport(reportData)
+      setOperationalCostsTotal(somaCustosOperacionaisNoPeriodo(operationalCosts, from, to))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -290,10 +299,12 @@ export default function RelatorioOperacaoPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <div style={{ color: '#aaa', fontSize: '0.85rem' }}>Receita Total do Período</div>
                   <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#4fc3f7' }}>{fmt(report.total_income)}</div>
+                  <div style={{ color: '#aaa', fontSize: '0.85rem', marginTop: '6px' }}>Custos Operacionais do Período</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ffb74d' }}>{fmt(operationalCostsTotal)}</div>
                   <div style={{ color: '#aaa', fontSize: '0.85rem', marginTop: '6px' }}>Custo Total do Período</div>
                   <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ef9a9a' }}>{fmt(report.total_cost)}</div>
                 </div>
-                <ResultBadge value={report.result} />
+                <ResultBadge value={Number(report.total_income) - Number(report.total_cost) - Number(operationalCostsTotal)} />
               </div>
             </>
           )}
